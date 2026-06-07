@@ -1,0 +1,20 @@
+# This needs to sync with pyclaw/help_pats.py
+
+global-exclude .DS_Store
+
+recursive-exclude pyclaw/website/examples *
+recursive-exclude pyclaw/website/_posts *
+
+exclude pyclaw/website/HISTORY.md
+exclude pyclaw/website/docs/benchmarks*.md
+exclude pyclaw/website/docs/ctags.md
+exclude pyclaw/website/docs/unified-diffs.md
+
+exclude pyclaw/website/install.ps1
+exclude pyclaw/website/install.sh
+
+recursive-exclude pyclaw/website/docs/leaderboards *
+recursive-exclude pyclaw/website/assets *
+recursive-exclude pyclaw/website *.js
+recursive-exclude pyclaw/website *.html
+recursive-exclude pyclaw/website *.yml

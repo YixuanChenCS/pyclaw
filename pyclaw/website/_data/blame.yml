@@ -1,0 +1,4896 @@
+- pyclaw_percentage: 31.33
+  pyclaw_total: 47
+  end_date: '2023-06-15'
+  end_tag: v0.6.0
+  file_counts:
+    pyclaw/coder.py:
+      Paul Gauthier: 32
+      Paul Gauthier (pyclaw): 4
+    pyclaw/commands.py:
+      Paul Gauthier: 2
+    pyclaw/main.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 5
+    pyclaw/models.py:
+      Paul Gauthier: 27
+    pyclaw/repomap.py:
+      Paul Gauthier: 6
+      Paul Gauthier (pyclaw): 1
+    pyclaw/utils.py:
+      Paul Gauthier: 25
+      Paul Gauthier (pyclaw): 21
+    setup.py:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 7
+    tests/test_utils.py:
+      Paul Gauthier (pyclaw): 9
+  grand_total:
+    Paul Gauthier: 103
+    Paul Gauthier (pyclaw): 47
+  start_tag: v0.5.0
+  total_lines: 150
+- pyclaw_percentage: 14.36
+  pyclaw_total: 209
+  end_date: '2023-06-25'
+  end_tag: v0.7.0
+  file_counts:
+    .github/workflows/release.yml:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 29
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/__init__.py:
+      Paul Gauthier: 6
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 314
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 35
+    pyclaw/coders/wholefile_coder.py:
+      Paul Gauthier: 115
+      Paul Gauthier (pyclaw): 3
+    pyclaw/coders/wholefile_func_coder.py:
+      Paul Gauthier: 120
+      Paul Gauthier (pyclaw): 11
+    pyclaw/commands.py:
+      Paul Gauthier: 28
+    pyclaw/diffs.py:
+      Paul Gauthier: 18
+    pyclaw/io.py:
+      Paul Gauthier: 16
+    pyclaw/main.py:
+      Paul Gauthier: 51
+      Paul Gauthier (pyclaw): 8
+    pyclaw/models.py:
+      Paul Gauthier: 52
+    scripts/benchmark.py:
+      Paul Gauthier: 312
+      Paul Gauthier (pyclaw): 22
+    scripts/versionbump.py:
+      Paul Gauthier: 13
+      Paul Gauthier (pyclaw): 44
+    setup.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 2
+    tests/test_coder.py:
+      Paul Gauthier: 15
+      Paul Gauthier (pyclaw): 18
+    tests/test_commands.py:
+      Paul Gauthier: 3
+    tests/test_editblock.py:
+      Paul Gauthier: 28
+    tests/test_main.py:
+      Paul Gauthier: 8
+    tests/test_models.py:
+      Paul Gauthier: 21
+      Paul Gauthier (pyclaw): 7
+    tests/test_wholefile.py:
+      Paul Gauthier: 86
+      Paul Gauthier (pyclaw): 65
+  grand_total:
+    Paul Gauthier: 1246
+    Paul Gauthier (pyclaw): 209
+  start_tag: v0.6.0
+  total_lines: 1455
+- pyclaw_percentage: 7.94
+  pyclaw_total: 139
+  end_date: '2023-07-06'
+  end_tag: v0.8.0
+  file_counts:
+    .github/workflows/ubuntu-tests.yml:
+      Paul Gauthier: 5
+    .github/workflows/windows-tests.yml:
+      Paul Gauthier: 13
+      Paul Gauthier (pyclaw): 15
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/__init__.py:
+      Paul Gauthier: 10
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 161
+      Paul Gauthier (pyclaw): 5
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 14
+    pyclaw/coders/editblock_func_coder.py:
+      Paul Gauthier: 131
+      Paul Gauthier (pyclaw): 8
+    pyclaw/coders/single_wholefile_func_coder.py:
+      Paul Gauthier: 49
+    pyclaw/coders/wholefile_coder.py:
+      Paul Gauthier: 24
+    pyclaw/coders/wholefile_func_coder.py:
+      Paul Gauthier: 14
+    pyclaw/commands.py:
+      Paul Gauthier: 18
+    pyclaw/diffs.py:
+      Paul Gauthier: 25
+    pyclaw/io.py:
+      Paul Gauthier: 38
+      Paul Gauthier (pyclaw): 9
+    pyclaw/main.py:
+      Paul Gauthier: 14
+      Paul Gauthier (pyclaw): 5
+      kwmiebach: 5
+    pyclaw/repomap.py:
+      Paul Gauthier: 30
+    pyclaw/utils.py:
+      Paul Gauthier: 11
+    benchmark/Dockerfile:
+      Paul Gauthier: 7
+    benchmark/benchmark.py:
+      Paul Gauthier: 447
+      Paul Gauthier (pyclaw): 29
+    benchmark/docker.sh:
+      Paul Gauthier: 11
+      Paul Gauthier (pyclaw): 1
+    benchmark/docker_build.sh:
+      Paul Gauthier: 8
+    benchmark/plot.sh:
+      Paul Gauthier: 29
+    benchmark/rungrid.py:
+      Paul Gauthier: 60
+    benchmark/test_benchmark.py:
+      Paul Gauthier: 35
+      Paul Gauthier (pyclaw): 12
+    tests/test_coder.py:
+      Paul Gauthier: 101
+      Paul Gauthier (pyclaw): 32
+    tests/test_commands.py:
+      Paul Gauthier: 21
+      Paul Gauthier (pyclaw): 17
+    tests/test_editblock.py:
+      Paul Gauthier: 86
+    tests/test_io.py:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 6
+    tests/test_main.py:
+      Paul Gauthier: 26
+    tests/test_repomap.py:
+      Paul Gauthier: 26
+    tests/test_wholefile.py:
+      Paul Gauthier: 189
+  grand_total:
+    Paul Gauthier: 1607
+    Paul Gauthier (pyclaw): 139
+    kwmiebach: 5
+  start_tag: v0.7.0
+  total_lines: 1751
+- pyclaw_percentage: 18.95
+  pyclaw_total: 170
+  end_date: '2023-07-16'
+  end_tag: v0.9.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 75
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 8
+    pyclaw/coders/single_wholefile_func_coder.py:
+      Paul Gauthier: 1
+    pyclaw/coders/wholefile_coder.py:
+      Paul Gauthier: 47
+    pyclaw/coders/wholefile_func_coder.py:
+      Paul Gauthier: 1
+    pyclaw/commands.py:
+      Paul Gauthier: 87
+      Paul Gauthier (pyclaw): 4
+    pyclaw/io.py:
+      Paul Gauthier: 8
+    pyclaw/main.py:
+      Paul Gauthier: 162
+      Paul Gauthier (pyclaw): 57
+    pyclaw/repomap.py:
+      Paul Gauthier: 37
+    pyclaw/utils.py:
+      Paul Gauthier: 8
+    benchmark/benchmark.py:
+      Paul Gauthier: 3
+    scripts/versionbump.py:
+      Paul Gauthier: 15
+      Paul Gauthier (pyclaw): 13
+    setup.py:
+      Paul Gauthier (pyclaw): 1
+    tests/test_coder.py:
+      Paul Gauthier: 110
+      Paul Gauthier (pyclaw): 30
+    tests/test_commands.py:
+      Paul Gauthier: 36
+      Paul Gauthier (pyclaw): 61
+    tests/test_editblock.py:
+      Paul Gauthier: 1
+    tests/test_io.py:
+      Paul Gauthier: 1
+    tests/test_main.py:
+      Paul Gauthier: 20
+    tests/test_repomap.py:
+      Paul Gauthier: 13
+      Paul Gauthier (pyclaw): 1
+    tests/test_wholefile.py:
+      Paul Gauthier: 50
+    tests/utils.py:
+      Paul Gauthier: 43
+      Paul Gauthier (pyclaw): 3
+  grand_total:
+    Paul Gauthier: 727
+    Paul Gauthier (pyclaw): 170
+  start_tag: v0.8.0
+  total_lines: 897
+- pyclaw_percentage: 12.26
+  pyclaw_total: 39
+  end_date: '2023-07-22'
+  end_tag: v0.10.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 24
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 11
+    pyclaw/coders/single_wholefile_func_coder.py:
+      Paul Gauthier: 2
+    pyclaw/coders/wholefile_coder.py:
+      Paul Gauthier: 2
+    pyclaw/coders/wholefile_func_coder.py:
+      Paul Gauthier: 2
+    pyclaw/commands.py:
+      Amer Amayreh: 4
+      Paul Gauthier (pyclaw): 12
+    pyclaw/io.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 5
+    pyclaw/main.py:
+      Paul Gauthier: 62
+    pyclaw/versioncheck.py:
+      Paul Gauthier: 22
+      Paul Gauthier (pyclaw): 5
+    benchmark/benchmark.py:
+      Paul Gauthier: 1
+    scripts/versionbump.py:
+      Paul Gauthier (pyclaw): 2
+    tests/test_coder.py:
+      Paul Gauthier: 43
+    tests/test_commands.py:
+      Paul Gauthier: 31
+      Paul Gauthier (pyclaw): 12
+    tests/test_editblock.py:
+      Paul Gauthier: 20
+    tests/test_main.py:
+      Paul Gauthier: 44
+      Paul Gauthier (pyclaw): 3
+    tests/utils.py:
+      Paul Gauthier: 6
+  grand_total:
+    Amer Amayreh: 4
+    Paul Gauthier: 275
+    Paul Gauthier (pyclaw): 39
+  start_tag: v0.9.0
+  total_lines: 318
+- pyclaw_percentage: 6.63
+  pyclaw_total: 55
+  end_date: '2023-08-02'
+  end_tag: v0.11.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 119
+    pyclaw/coders/wholefile_coder.py:
+      Paul Gauthier: 2
+    pyclaw/commands.py:
+      Paul Gauthier: 38
+      Paul Gauthier (pyclaw): 2
+    pyclaw/history.py:
+      Paul Gauthier: 103
+      Paul Gauthier (pyclaw): 25
+    pyclaw/main.py:
+      Paul Gauthier: 86
+      Paul Gauthier (pyclaw): 3
+    pyclaw/repo.py:
+      Paul Gauthier: 133
+      Paul Gauthier (pyclaw): 13
+    pyclaw/sendchat.py:
+      Paul Gauthier: 64
+    scripts/versionbump.py:
+      Paul Gauthier: 4
+    tests/test_coder.py:
+      Paul Gauthier: 35
+    tests/test_commands.py:
+      Paul Gauthier: 53
+      Paul Gauthier (pyclaw): 6
+    tests/test_main.py:
+      Paul Gauthier: 30
+      Paul Gauthier (pyclaw): 1
+    tests/test_repo.py:
+      Paul Gauthier: 75
+      Paul Gauthier (pyclaw): 5
+    tests/test_sendchat.py:
+      Paul Gauthier: 25
+    tests/utils.py:
+      Paul Gauthier: 6
+  grand_total:
+    Paul Gauthier: 774
+    Paul Gauthier (pyclaw): 55
+  start_tag: v0.10.0
+  total_lines: 829
+- pyclaw_percentage: 5.21
+  pyclaw_total: 28
+  end_date: '2023-08-11'
+  end_tag: v0.12.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Arseniy Pavlenko: 3
+      Paul Gauthier: 4
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 124
+    pyclaw/commands.py:
+      Joshua Vial: 2
+      Paul Gauthier: 17
+      Paul Gauthier (pyclaw): 3
+    pyclaw/history.py:
+      Paul Gauthier: 10
+    pyclaw/io.py:
+      Paul Gauthier: 10
+    pyclaw/main.py:
+      Paul Gauthier: 2
+    pyclaw/repo.py:
+      Paul Gauthier: 26
+    pyclaw/repomap.py:
+      Paul Gauthier: 22
+    pyclaw/sendchat.py:
+      Paul Gauthier: 17
+    pyclaw/voice.py:
+      Paul Gauthier: 77
+      Paul Gauthier (pyclaw): 8
+    benchmark/benchmark.py:
+      Paul Gauthier: 60
+    scripts/versionbump.py:
+      Paul Gauthier: 1
+    tests/test_coder.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 17
+    tests/test_commands.py:
+      Paul Gauthier: 22
+    tests/test_editblock.py:
+      Paul Gauthier: 52
+    tests/test_repo.py:
+      Paul Gauthier: 58
+  grand_total:
+    Arseniy Pavlenko: 3
+    Joshua Vial: 2
+    Paul Gauthier: 504
+    Paul Gauthier (pyclaw): 28
+  start_tag: v0.11.0
+  total_lines: 537
+- pyclaw_percentage: 4.18
+  pyclaw_total: 24
+  end_date: '2023-08-22'
+  end_tag: v0.13.0
+  file_counts:
+    .github/workflows/ubuntu-tests.yml:
+      Paul Gauthier: 1
+    .github/workflows/windows-tests.yml:
+      Paul Gauthier: 1
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 93
+      Paul Gauthier (pyclaw): 2
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 6
+    pyclaw/coders/editblock_func_coder.py:
+      Paul Gauthier: 2
+    pyclaw/coders/single_wholefile_func_coder.py:
+      Paul Gauthier: 2
+    pyclaw/coders/wholefile_coder.py:
+      Paul Gauthier: 16
+    pyclaw/coders/wholefile_func_coder.py:
+      Paul Gauthier: 3
+    pyclaw/commands.py:
+      Paul Gauthier: 34
+    pyclaw/io.py:
+      Paul Gauthier: 8
+    pyclaw/main.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 20
+    pyclaw/repo.py:
+      Paul Gauthier: 59
+    pyclaw/voice.py:
+      Paul Gauthier: 26
+    setup.py:
+      Paul Gauthier (pyclaw): 1
+    tests/test_coder.py:
+      Paul Gauthier: 277
+      Paul Gauthier (pyclaw): 1
+    tests/test_main.py:
+      Paul Gauthier: 1
+    tests/test_repo.py:
+      Paul Gauthier: 17
+    tests/test_wholefile.py:
+      Paul Gauthier: 1
+  grand_total:
+    Paul Gauthier: 550
+    Paul Gauthier (pyclaw): 24
+  start_tag: v0.12.0
+  total_lines: 574
+- pyclaw_percentage: 0.53
+  pyclaw_total: 1
+  end_date: '2023-09-08'
+  end_tag: v0.14.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Joshua Vial: 20
+      Paul Gauthier: 4
+    pyclaw/commands.py:
+      JV: 1
+    pyclaw/history.py:
+      JV: 1
+      Joshua Vial: 6
+    pyclaw/main.py:
+      JV: 1
+      Joshua Vial: 1
+    pyclaw/models/__init__.py:
+      JV: 1
+      Paul Gauthier: 14
+    pyclaw/models/model.py:
+      JV: 27
+      Joshua Vial: 4
+      Paul Gauthier: 8
+    pyclaw/models/openai.py:
+      JV: 3
+      Paul Gauthier: 3
+    pyclaw/models/openrouter.py:
+      JV: 28
+      Joshua Vial: 2
+      Paul Gauthier: 15
+      Paul Gauthier (pyclaw): 1
+    pyclaw/repo.py:
+      JV: 2
+    pyclaw/repomap.py:
+      JV: 1
+      Joshua Vial: 1
+    pyclaw/sendchat.py:
+      JV: 2
+      Joshua Vial: 4
+      Paul Gauthier: 1
+    benchmark/Dockerfile:
+      Paul Gauthier: 1
+    setup.py:
+      Paul Gauthier: 1
+    tests/test_models.py:
+      Joshua Vial: 22
+      Paul Gauthier: 13
+  grand_total:
+    JV: 67
+    Joshua Vial: 60
+    Paul Gauthier: 61
+    Paul Gauthier (pyclaw): 1
+  start_tag: v0.13.0
+  total_lines: 189
+- pyclaw_percentage: 10.57
+  pyclaw_total: 41
+  end_date: '2023-10-20'
+  end_tag: v0.15.0
+  file_counts:
+    .github/workflows/release.yml:
+      Paul Gauthier: 9
+      Paul Gauthier (pyclaw): 14
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 13
+      Thinh Nguyen: 2
+    pyclaw/commands.py:
+      Alexander Kjeldaas (pyclaw): 1
+      Paul Gauthier: 49
+    pyclaw/main.py:
+      Paul Gauthier: 29
+      Paul Gauthier (pyclaw): 24
+      Thinh Nguyen: 7
+    pyclaw/repo.py:
+      Paul Gauthier: 26
+      Paul Gauthier (pyclaw): 2
+    pyclaw/repomap.py:
+      Paul Gauthier: 11
+    pyclaw/voice.py:
+      Paul Gauthier: 9
+    benchmark/Dockerfile:
+      Joshua Vial: 1
+    benchmark/benchmark.py:
+      Joshua Vial: 1
+    docker/Dockerfile:
+      Paul Gauthier: 9
+    scripts/versionbump.py:
+      Paul Gauthier: 2
+    tests/test_commands.py:
+      Paul Gauthier: 123
+    tests/test_main.py:
+      Paul Gauthier: 17
+    tests/test_repo.py:
+      Paul Gauthier: 38
+  grand_total:
+    Alexander Kjeldaas (pyclaw): 1
+    Joshua Vial: 2
+    Paul Gauthier: 336
+    Paul Gauthier (pyclaw): 40
+    Thinh Nguyen: 9
+  start_tag: v0.14.0
+  total_lines: 388
+- pyclaw_percentage: 1.71
+  pyclaw_total: 16
+  end_date: '2023-10-29'
+  end_tag: v0.16.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 7
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 13
+    pyclaw/commands.py:
+      Paul Gauthier: 5
+    pyclaw/queries/tree-sitter-c-sharp-tags.scm:
+      Paul Gauthier: 46
+    pyclaw/queries/tree-sitter-c-tags.scm:
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 4
+    pyclaw/queries/tree-sitter-cpp-tags.scm:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 8
+    pyclaw/queries/tree-sitter-elisp-tags.scm:
+      Paul Gauthier: 5
+    pyclaw/queries/tree-sitter-elixir-tags.scm:
+      Paul Gauthier: 54
+    pyclaw/queries/tree-sitter-elm-tags.scm:
+      Paul Gauthier: 19
+    pyclaw/queries/tree-sitter-go-tags.scm:
+      Paul Gauthier: 30
+    pyclaw/queries/tree-sitter-java-tags.scm:
+      Paul Gauthier: 20
+    pyclaw/queries/tree-sitter-javascript-tags.scm:
+      Paul Gauthier: 88
+    pyclaw/queries/tree-sitter-ocaml-tags.scm:
+      Paul Gauthier: 116
+    pyclaw/queries/tree-sitter-php-tags.scm:
+      Paul Gauthier: 26
+    pyclaw/queries/tree-sitter-python-tags.scm:
+      Paul Gauthier: 12
+    pyclaw/queries/tree-sitter-ql-tags.scm:
+      Paul Gauthier: 26
+    pyclaw/queries/tree-sitter-ruby-tags.scm:
+      Paul Gauthier: 64
+    pyclaw/queries/tree-sitter-rust-tags.scm:
+      Paul Gauthier: 60
+    pyclaw/queries/tree-sitter-typescript-tags.scm:
+      Paul Gauthier: 23
+    pyclaw/repomap.py:
+      Paul Gauthier: 193
+      Paul Gauthier (pyclaw): 2
+    benchmark/Dockerfile:
+      Paul Gauthier: 4
+    docker/Dockerfile:
+      Paul Gauthier: 1
+    setup.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 2
+    tests/test_coder.py:
+      Paul Gauthier: 21
+    tests/test_commands.py:
+      Paul Gauthier: 10
+      paul-gauthier: 1
+    tests/test_editblock.py:
+      Paul Gauthier: 55
+    tests/test_repomap.py:
+      Paul Gauthier: 5
+  grand_total:
+    Paul Gauthier: 918
+    Paul Gauthier (pyclaw): 16
+    paul-gauthier: 1
+  start_tag: v0.15.0
+  total_lines: 935
+- pyclaw_percentage: 7.91
+  pyclaw_total: 22
+  end_date: '2023-11-06'
+  end_tag: v0.17.0
+  file_counts:
+    .github/workflows/docker-build-test.yml:
+      Paul Gauthier: 11
+      Paul Gauthier (pyclaw): 16
+    .github/workflows/release.yml:
+      Paul Gauthier: 4
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 21
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 29
+    pyclaw/commands.py:
+      Omri Bloch: 1
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 6
+    pyclaw/io.py:
+      Paul Gauthier: 1
+    pyclaw/main.py:
+      Paul Gauthier: 3
+    pyclaw/models/openai.py:
+      Paul Gauthier: 9
+    pyclaw/queries/tree-sitter-elisp-tags.scm:
+      Paul Gauthier: 3
+    pyclaw/repomap.py:
+      Paul Gauthier: 6
+    benchmark/Dockerfile:
+      Paul Gauthier: 2
+    benchmark/benchmark.py:
+      Paul Gauthier: 24
+    docker/Dockerfile:
+      Paul Gauthier: 5
+    setup.py:
+      Jack Hallam: 3
+      Paul Gauthier: 10
+    tests/test_commands.py:
+      Paul Gauthier: 65
+    tests/test_editblock.py:
+      Paul Gauthier: 23
+    tests/test_io.py:
+      Paul Gauthier: 24
+    tests/utils.py:
+      Paul Gauthier: 6
+  grand_total:
+    Jack Hallam: 3
+    Omri Bloch: 1
+    Paul Gauthier: 252
+    Paul Gauthier (pyclaw): 22
+  start_tag: v0.16.0
+  total_lines: 278
+- pyclaw_percentage: 38.49
+  pyclaw_total: 107
+  end_date: '2023-11-17'
+  end_tag: v0.18.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 33
+    pyclaw/commands.py:
+      Paul Gauthier: 12
+      Paul Gauthier (pyclaw): 3
+    pyclaw/io.py:
+      Paul Gauthier: 3
+    pyclaw/models/model.py:
+      Paul Gauthier: 13
+    pyclaw/repomap.py:
+      Paul Gauthier: 10
+    benchmark/benchmark.py:
+      Paul Gauthier: 22
+      Paul Gauthier (pyclaw): 50
+    benchmark/rungrid.py:
+      Paul Gauthier: 16
+    scripts/versionbump.py:
+      Paul Gauthier (pyclaw): 41
+    tests/test_coder.py:
+      Paul Gauthier: 25
+    tests/test_commands.py:
+      Paul Gauthier: 19
+    tests/test_main.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 13
+    tests/test_repomap.py:
+      Paul Gauthier: 13
+  grand_total:
+    Paul Gauthier: 171
+    Paul Gauthier (pyclaw): 107
+  start_tag: v0.17.0
+  total_lines: 278
+- pyclaw_percentage: 0.75
+  pyclaw_total: 14
+  end_date: '2023-12-19'
+  end_tag: v0.19.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/__init__.py:
+      Paul Gauthier: 2
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 66
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 2
+    pyclaw/coders/search_replace.py:
+      Paul Gauthier: 769
+    pyclaw/coders/udiff_coder.py:
+      Paul Gauthier: 395
+    pyclaw/coders/wholefile_coder.py:
+      Paul Gauthier: 2
+    pyclaw/commands.py:
+      Paul Gauthier: 1
+    pyclaw/history.py:
+      Paul Gauthier: 3
+    pyclaw/main.py:
+      Paul Gauthier: 44
+      Your Name: 3
+      Your Name (pyclaw): 14
+    pyclaw/models/__init__.py:
+      Paul Gauthier: 3
+    pyclaw/models/model.py:
+      Paul Gauthier: 7
+    pyclaw/models/openai.py:
+      Paul Gauthier: 13
+    pyclaw/models/openrouter.py:
+      Paul Gauthier: 4
+    pyclaw/repo.py:
+      Paul Gauthier: 4
+    pyclaw/sendchat.py:
+      Paul Gauthier: 15
+    pyclaw/utils.py:
+      Paul Gauthier: 28
+    pyclaw/voice.py:
+      Paul Gauthier: 7
+    benchmark/benchmark.py:
+      Paul Gauthier: 200
+    benchmark/refactor_tools.py:
+      Paul Gauthier: 209
+    tests/test_coder.py:
+      Paul Gauthier: 11
+    tests/test_commands.py:
+      Paul Gauthier: 1
+    tests/test_io.py:
+      Paul Gauthier: 1
+    tests/test_main.py:
+      Paul Gauthier: 10
+      Your Name: 18
+    tests/test_models.py:
+      Paul Gauthier: 10
+    tests/test_repo.py:
+      Paul Gauthier: 1
+    tests/test_repomap.py:
+      Paul Gauthier: 1
+    tests/test_sendchat.py:
+      Paul Gauthier: 23
+    tests/test_wholefile.py:
+      Paul Gauthier: 10
+  grand_total:
+    Paul Gauthier: 1843
+    Your Name: 21
+    Your Name (pyclaw): 14
+  start_tag: v0.18.0
+  total_lines: 1878
+- pyclaw_percentage: 11.49
+  pyclaw_total: 40
+  end_date: '2024-01-04'
+  end_tag: v0.20.0
+  file_counts:
+    .github/workflows/docker-build-test.yml:
+      Paul Gauthier: 4
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Joshua Vial: 28
+      Paul Gauthier: 25
+    pyclaw/coders/search_replace.py:
+      Paul Gauthier: 2
+    pyclaw/coders/udiff_coder.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 2
+    pyclaw/commands.py:
+      Christopher Toth: 2
+      Joshua Vial: 16
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 7
+    pyclaw/io.py:
+      Joshua Vial: 15
+    pyclaw/models/model.py:
+      Joshua Vial: 43
+    pyclaw/models/openrouter.py:
+      Joshua Vial: 4
+    pyclaw/repo.py:
+      Christopher Toth: 5
+    pyclaw/repomap.py:
+      Paul Gauthier: 6
+    pyclaw/sendchat.py:
+      Joshua Vial: 9
+    pyclaw/utils.py:
+      Joshua Vial: 29
+    benchmark/benchmark.py:
+      Joshua Vial: 16
+    tests/test_commands.py:
+      Paul Gauthier: 21
+      Paul Gauthier (pyclaw): 24
+    tests/test_models.py:
+      Joshua Vial: 13
+    tests/test_udiff.py:
+      Paul Gauthier: 66
+      Paul Gauthier (pyclaw): 7
+  grand_total:
+    Christopher Toth: 7
+    Joshua Vial: 173
+    Paul Gauthier: 128
+    Paul Gauthier (pyclaw): 40
+  start_tag: v0.19.0
+  total_lines: 348
+- pyclaw_percentage: 19.78
+  pyclaw_total: 18
+  end_date: '2024-01-08'
+  end_tag: v0.21.0
+  file_counts:
+    .github/workflows/ubuntu-tests.yml:
+      Paul Gauthier: 1
+    .github/workflows/windows-tests.yml:
+      Paul Gauthier: 1
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/udiff_coder.py:
+      Paul Gauthier: 22
+    pyclaw/main.py:
+      Paul Gauthier (pyclaw): 10
+    pyclaw/versioncheck.py:
+      Paul Gauthier (pyclaw): 8
+    setup.py:
+      Paul Gauthier: 2
+    tests/test_udiff.py:
+      Paul Gauthier: 46
+  grand_total:
+    Paul Gauthier: 73
+    Paul Gauthier (pyclaw): 18
+  start_tag: v0.20.0
+  total_lines: 91
+- pyclaw_percentage: 0.0
+  pyclaw_total: 0
+  end_date: '2024-01-22'
+  end_tag: v0.22.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 2
+    pyclaw/coders/udiff_coder.py:
+      Paul Gauthier: 5
+    pyclaw/commands.py:
+      Paul Gauthier: 48
+    pyclaw/main.py:
+      Paul Gauthier: 2
+  grand_total:
+    Paul Gauthier: 58
+  start_tag: v0.21.0
+  total_lines: 58
+- pyclaw_percentage: 1.11
+  pyclaw_total: 2
+  end_date: '2024-02-03'
+  end_tag: v0.23.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 10
+    pyclaw/commands.py:
+      Paul Gauthier: 5
+    pyclaw/main.py:
+      Paul Gauthier: 15
+      Zachary Vorhies: 7
+    pyclaw/mdstream.py:
+      Paul Gauthier: 120
+      Paul Gauthier (pyclaw): 2
+    pyclaw/models/openai.py:
+      Paul Gauthier: 3
+    benchmark/benchmark.py:
+      Paul Gauthier: 17
+  grand_total:
+    Paul Gauthier: 171
+    Paul Gauthier (pyclaw): 2
+    Zachary Vorhies: 7
+  start_tag: v0.22.0
+  total_lines: 180
+- pyclaw_percentage: 5.07
+  pyclaw_total: 19
+  end_date: '2024-02-10'
+  end_tag: v0.24.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 5
+    pyclaw/commands.py:
+      Paul Gauthier: 16
+      Paul Gauthier (pyclaw): 8
+    pyclaw/main.py:
+      Paul Gauthier: 2
+    pyclaw/models/__init__.py:
+      Paul Gauthier: 2
+    pyclaw/models/model.py:
+      Paul Gauthier: 3
+    pyclaw/models/openai.py:
+      Paul Gauthier: 135
+    pyclaw/scrape.py:
+      Paul Gauthier: 176
+      Paul Gauthier (pyclaw): 11
+    pyclaw/utils.py:
+      Paul Gauthier: 8
+    tests/test_models.py:
+      Paul Gauthier: 8
+  grand_total:
+    Paul Gauthier: 356
+    Paul Gauthier (pyclaw): 19
+  start_tag: v0.23.0
+  total_lines: 375
+- pyclaw_percentage: 6.02
+  pyclaw_total: 8
+  end_date: '2024-03-04'
+  end_tag: v0.25.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 46
+    pyclaw/commands.py:
+      Paul Gauthier: 5
+    pyclaw/main.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 8
+    pyclaw/models/openai.py:
+      Paul Gauthier: 1
+    pyclaw/repo.py:
+      Paul Gauthier: 11
+    pyclaw/scrape.py:
+      Paul Gauthier: 1
+    tests/test_coder.py:
+      Paul Gauthier: 28
+    tests/test_commands.py:
+      Paul Gauthier: 28
+  grand_total:
+    Paul Gauthier: 125
+    Paul Gauthier (pyclaw): 8
+  start_tag: v0.24.0
+  total_lines: 133
+- pyclaw_percentage: 0.0
+  pyclaw_total: 0
+  end_date: '2024-03-08'
+  end_tag: v0.26.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 8
+    pyclaw/main.py:
+      Paul Gauthier: 30
+  grand_total:
+    Paul Gauthier: 39
+  start_tag: v0.25.0
+  total_lines: 39
+- pyclaw_percentage: 0.0
+  pyclaw_total: 0
+  end_date: '2024-03-22'
+  end_tag: v0.27.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/commands.py:
+      Paul Gauthier: 10
+    pyclaw/main.py:
+      Paul Gauthier: 14
+    pyclaw/queries/tree-sitter-typescript-tags.scm:
+      Ryan Freckleton: 32
+    pyclaw/repomap.py:
+      Paul Gauthier: 6
+    benchmark/benchmark.py:
+      Paul Gauthier: 111
+    tests/test_commands.py:
+      Paul Gauthier: 3
+    tests/test_repomap.py:
+      Ryan Freckleton: 59
+  grand_total:
+    Paul Gauthier: 145
+    Ryan Freckleton: 91
+  start_tag: v0.26.0
+  total_lines: 236
+- pyclaw_percentage: 0.0
+  pyclaw_total: 0
+  end_date: '2024-04-09'
+  end_tag: v0.28.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/models/openai.py:
+      Paul Gauthier: 10
+  grand_total:
+    Paul Gauthier: 11
+  start_tag: v0.27.0
+  total_lines: 11
+- pyclaw_percentage: 5.47
+  pyclaw_total: 35
+  end_date: '2024-04-21'
+  end_tag: v0.29.0
+  file_counts:
+    .github/workflows/docker-build-test.yml:
+      Paul Gauthier: 1
+    .github/workflows/release.yml:
+      Paul Gauthier: 2
+    .github/workflows/ubuntu-tests.yml:
+      Paul Gauthier: 2
+    .github/workflows/windows-tests.yml:
+      Paul Gauthier: 2
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Aloha: 1
+      Paul Gauthier: 22
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 9
+    pyclaw/coders/wholefile_coder.py:
+      Paul Gauthier: 2
+    pyclaw/commands.py:
+      Paul Gauthier: 30
+    pyclaw/history.py:
+      Paul Gauthier: 6
+    pyclaw/main.py:
+      Paul Gauthier: 81
+    pyclaw/models.py:
+      Paul Gauthier: 219
+      Paul Gauthier (pyclaw): 33
+    pyclaw/repo.py:
+      Paul Gauthier: 19
+    pyclaw/repomap.py:
+      Paul Gauthier: 10
+      Paul Gauthier (pyclaw): 2
+    pyclaw/sendchat.py:
+      Paul Gauthier: 4
+    pyclaw/voice.py:
+      Paul Gauthier: 3
+    benchmark/benchmark.py:
+      Paul Gauthier: 60
+    tests/test_coder.py:
+      Paul Gauthier: 28
+    tests/test_commands.py:
+      Paul Gauthier: 25
+    tests/test_editblock.py:
+      Paul Gauthier: 4
+    tests/test_models.py:
+      Paul Gauthier: 13
+    tests/test_repo.py:
+      Paul Gauthier: 26
+    tests/test_repomap.py:
+      Paul Gauthier: 13
+    tests/test_sendchat.py:
+      Paul Gauthier: 8
+    tests/test_wholefile.py:
+      Paul Gauthier: 14
+  grand_total:
+    Aloha: 1
+    Paul Gauthier: 604
+    Paul Gauthier (pyclaw): 35
+  start_tag: v0.28.0
+  total_lines: 640
+- pyclaw_percentage: 0.0
+  pyclaw_total: 0
+  end_date: '2024-04-23'
+  end_tag: v0.30.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 11
+    pyclaw/history.py:
+      Paul Gauthier: 2
+    pyclaw/main.py:
+      Paul Gauthier: 27
+    pyclaw/models.py:
+      Paul Gauthier: 171
+    pyclaw/sendchat.py:
+      Paul Gauthier: 3
+    pyclaw/voice.py:
+      Paul Gauthier: 2
+    benchmark/benchmark.py:
+      Paul Gauthier: 1
+    tests/test_coder.py:
+      Paul Gauthier: 1
+    tests/test_commands.py:
+      Paul Gauthier: 1
+    tests/test_editblock.py:
+      Paul Gauthier: 1
+    tests/test_models.py:
+      Paul Gauthier: 6
+    tests/test_repo.py:
+      Paul Gauthier: 1
+    tests/test_repomap.py:
+      Paul Gauthier: 2
+    tests/test_wholefile.py:
+      Paul Gauthier: 1
+  grand_total:
+    Paul Gauthier: 231
+  start_tag: v0.29.0
+  total_lines: 231
+- pyclaw_percentage: 0.16
+  pyclaw_total: 2
+  end_date: '2024-05-02'
+  end_tag: v0.31.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 375
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 131
+    pyclaw/commands.py:
+      Paul Gauthier: 45
+    pyclaw/gui.py:
+      Paul Gauthier: 531
+      Paul Gauthier (pyclaw): 2
+    pyclaw/main.py:
+      Paul Gauthier: 114
+    pyclaw/models.py:
+      Paul Gauthier: 14
+    pyclaw/scrape.py:
+      Paul Gauthier: 15
+    pyclaw/sendchat.py:
+      Paul Gauthier: 3
+    tests/test_coder.py:
+      Paul Gauthier: 16
+    tests/test_commands.py:
+      Paul Gauthier: 10
+    tests/test_editblock.py:
+      Paul Gauthier: 4
+    tests/test_wholefile.py:
+      Paul Gauthier: 1
+  grand_total:
+    Paul Gauthier: 1260
+    Paul Gauthier (pyclaw): 2
+  start_tag: v0.30.0
+  total_lines: 1262
+- pyclaw_percentage: 3.0
+  pyclaw_total: 8
+  end_date: '2024-05-07'
+  end_tag: v0.32.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 7
+    pyclaw/coders/__init__.py:
+      Paul Gauthier: 2
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 55
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 4
+    pyclaw/coders/editblock_fenced_coder.py:
+      Paul Gauthier: 11
+    pyclaw/gui.py:
+      Paul Gauthier: 1
+    pyclaw/main.py:
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 3
+    pyclaw/models.py:
+      Paul Gauthier: 54
+    pyclaw/sendchat.py:
+      Paul Gauthier: 10
+    pyclaw/utils.py:
+      Paul Gauthier: 1
+    benchmark/benchmark.py:
+      Paul Gauthier: 81
+      Paul Gauthier (pyclaw): 5
+    benchmark/plots.py:
+      Paul Gauthier: 5
+    tests/test_main.py:
+      Paul Gauthier: 18
+    tests/test_sendchat.py:
+      Paul Gauthier: 4
+  grand_total:
+    Paul Gauthier: 259
+    Paul Gauthier (pyclaw): 8
+  start_tag: v0.31.0
+  total_lines: 267
+- pyclaw_percentage: 0.0
+  pyclaw_total: 0
+  end_date: '2024-05-08'
+  end_tag: v0.33.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 1
+    pyclaw/commands.py:
+      Paul Gauthier: 1
+    pyclaw/litellm.py:
+      Paul Gauthier: 11
+    pyclaw/main.py:
+      Paul Gauthier: 1
+    pyclaw/models.py:
+      Paul Gauthier: 9
+    pyclaw/sendchat.py:
+      Paul Gauthier: 1
+    pyclaw/voice.py:
+      Paul Gauthier: 2
+  grand_total:
+    Paul Gauthier: 27
+  start_tag: v0.32.0
+  total_lines: 27
+- pyclaw_percentage: 0.0
+  pyclaw_total: 0
+  end_date: '2024-05-10'
+  end_tag: v0.34.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 6
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 18
+    pyclaw/main.py:
+      Paul Gauthier: 9
+    pyclaw/models.py:
+      Paul Gauthier: 14
+    pyclaw/repomap.py:
+      Paul Gauthier: 3
+    pyclaw/sendchat.py:
+      Paul Gauthier: 7
+    tests/test_sendchat.py:
+      Paul Gauthier: 4
+  grand_total:
+    Paul Gauthier: 62
+  start_tag: v0.33.0
+  total_lines: 62
+- pyclaw_percentage: 6.42
+  pyclaw_total: 17
+  end_date: '2024-05-13'
+  end_tag: v0.35.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 18
+      Paul Gauthier (pyclaw): 5
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 22
+      Paul Gauthier (pyclaw): 1
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 84
+      Paul Gauthier (pyclaw): 10
+    pyclaw/history.py:
+      Paul Gauthier: 20
+    pyclaw/io.py:
+      Paul Gauthier: 8
+    pyclaw/main.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 1
+    pyclaw/models.py:
+      Paul Gauthier: 25
+    pyclaw/sendchat.py:
+      Paul Gauthier: 8
+    pyclaw/utils.py:
+      Paul Gauthier: 51
+    pyclaw/versioncheck.py:
+      Paul Gauthier: 10
+  grand_total:
+    Paul Gauthier: 248
+    Paul Gauthier (pyclaw): 17
+  start_tag: v0.34.0
+  total_lines: 265
+- pyclaw_percentage: 14.64
+  pyclaw_total: 89
+  end_date: '2024-05-22'
+  end_tag: v0.36.0
+  file_counts:
+    Gemfile:
+      Paul Gauthier (pyclaw): 5
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 42
+      Paul Gauthier (pyclaw): 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 113
+      Paul Gauthier (pyclaw): 3
+    pyclaw/coders/wholefile_coder.py:
+      Paul Gauthier (pyclaw): 2
+    pyclaw/commands.py:
+      Paul Gauthier: 49
+    pyclaw/io.py:
+      Paul Gauthier: 9
+    pyclaw/linter.py:
+      Paul Gauthier: 211
+      Paul Gauthier (pyclaw): 29
+    pyclaw/litellm.py:
+      Paul Gauthier: 2
+    pyclaw/main.py:
+      Paul Gauthier: 48
+      Paul Gauthier (pyclaw): 2
+    pyclaw/models.py:
+      Paul Gauthier: 3
+    pyclaw/repo.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 14
+    benchmark/benchmark.py:
+      Paul Gauthier: 5
+    benchmark/over_time.py:
+      Paul Gauthier: 30
+      Paul Gauthier (pyclaw): 27
+    scripts/jekyll_build.sh:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 3
+    scripts/jekyll_run.sh:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 3
+  grand_total:
+    Paul Gauthier: 519
+    Paul Gauthier (pyclaw): 89
+  start_tag: v0.35.0
+  total_lines: 608
+- pyclaw_percentage: 18.65
+  pyclaw_total: 113
+  end_date: '2024-06-04'
+  end_tag: v0.37.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 73
+      Paul Gauthier (pyclaw): 3
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 1
+    pyclaw/commands.py:
+      Aleksandr Bobrov: 1
+      Aleksandr Bobrov (pyclaw): 1
+      Paul Gauthier: 24
+    pyclaw/io.py:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 1
+    pyclaw/linter.py:
+      Paul Gauthier: 4
+    pyclaw/litellm.py:
+      Paul Gauthier: 1
+    pyclaw/repomap.py:
+      Paul Gauthier: 115
+    pyclaw/sendchat.py:
+      Paul Gauthier: 2
+    pyclaw/voice.py:
+      Paul Gauthier (pyclaw): 4
+    benchmark/over_time.py:
+      Paul Gauthier (pyclaw): 7
+    benchmark/swe_bench.py:
+      Paul Gauthier: 101
+      Paul Gauthier (pyclaw): 30
+    scripts/blame.py:
+      Paul Gauthier: 159
+      Paul Gauthier (pyclaw): 53
+    tests/test_io.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 14
+  grand_total:
+    Aleksandr Bobrov: 1
+    Aleksandr Bobrov (pyclaw): 1
+    Paul Gauthier: 492
+    Paul Gauthier (pyclaw): 112
+  start_tag: v0.36.0
+  total_lines: 606
+- pyclaw_percentage: 8.96
+  pyclaw_total: 50
+  end_date: '2024-06-16'
+  end_tag: v0.38.0
+  file_counts:
+    .github/workflows/docker-build-test.yml:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 4
+    .github/workflows/pages.yml:
+      Paul Gauthier: 71
+    .github/workflows/ubuntu-tests.yml:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 4
+    .github/workflows/windows-tests.yml:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 4
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Krazer: 4
+      Paul Gauthier: 58
+      develmusa: 1
+    pyclaw/args_formatter.py:
+      Paul Gauthier: 119
+      Paul Gauthier (pyclaw): 17
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 78
+    pyclaw/commands.py:
+      Paul Gauthier: 29
+    pyclaw/gui.py:
+      Paul Gauthier: 22
+    pyclaw/io.py:
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 2
+    pyclaw/main.py:
+      Krazer: 13
+      Paul Gauthier: 11
+      Paul Gauthier (pyclaw): 5
+    pyclaw/models.py:
+      Krazer: 11
+      Paul Gauthier: 10
+    pyclaw/repo.py:
+      Paul Gauthier: 2
+    pyclaw/repomap.py:
+      Paul Gauthier: 13
+    pyclaw/scrape.py:
+      Paul Gauthier: 10
+    pyclaw/tests/test_urls.py:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 8
+    pyclaw/urls.py:
+      Paul Gauthier: 8
+    scripts/jekyll_run.sh:
+      Paul Gauthier: 9
+    scripts/update-docs.sh:
+      Paul Gauthier: 14
+      Paul Gauthier (pyclaw): 6
+    website/Gemfile:
+      Paul Gauthier: 4
+  grand_total:
+    Krazer: 28
+    Paul Gauthier: 479
+    Paul Gauthier (pyclaw): 50
+    develmusa: 1
+  start_tag: v0.37.0
+  total_lines: 558
+- pyclaw_percentage: 17.1
+  pyclaw_total: 59
+  end_date: '2024-06-20'
+  end_tag: v0.39.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/__main__.py:
+      Paul Gauthier (pyclaw): 4
+    pyclaw/args.py:
+      Daniel Vainsencher: 6
+      John-Mason P. Shackelford: 18
+      Paul Gauthier: 23
+    pyclaw/args_formatter.py:
+      Paul Gauthier: 24
+      Paul Gauthier (pyclaw): 15
+    pyclaw/coders/base_coder.py:
+      Daniel Vainsencher: 5
+      Daniel Vainsencher (pyclaw): 2
+      Paul Gauthier: 2
+    pyclaw/commands.py:
+      Paul Gauthier: 1
+    pyclaw/io.py:
+      Daniel Vainsencher: 14
+    pyclaw/main.py:
+      Daniel Vainsencher: 1
+      John-Mason P. Shackelford: 14
+    pyclaw/models.py:
+      Paul Gauthier: 18
+    pyclaw/repo.py:
+      Paul Gauthier: 23
+    pyclaw/scrape.py:
+      Nicolas Perez: 1
+    pyclaw/tests/test_commands.py:
+      Paul Gauthier: 6
+    pyclaw/tests/test_main.py:
+      John-Mason P. Shackelford: 88
+    pyclaw/tests/test_repo.py:
+      Paul Gauthier: 24
+      Paul Gauthier (pyclaw): 24
+    pyclaw/urls.py:
+      Nicolas Perez: 1
+      Paul Gauthier: 1
+    pyclaw/utils.py:
+      Daniel Vainsencher: 7
+      Daniel Vainsencher (pyclaw): 14
+      John-Mason P. Shackelford: 7
+    scripts/update-docs.sh:
+      Paul Gauthier: 1
+  grand_total:
+    Daniel Vainsencher: 33
+    Daniel Vainsencher (pyclaw): 16
+    John-Mason P. Shackelford: 127
+    Nicolas Perez: 2
+    Paul Gauthier: 124
+    Paul Gauthier (pyclaw): 43
+  start_tag: v0.38.0
+  total_lines: 345
+- pyclaw_percentage: 5.82
+  pyclaw_total: 21
+  end_date: '2024-06-24'
+  end_tag: v0.40.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Krazer: 6
+      Paul Gauthier: 33
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 28
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 64
+    pyclaw/linter.py:
+      Paul Gauthier: 24
+      Paul Gauthier (pyclaw): 21
+    pyclaw/main.py:
+      Krazer: 36
+      Paul Gauthier: 23
+    pyclaw/models.py:
+      Dustin Miller: 14
+      Krazer: 31
+      Paul Gauthier: 28
+    pyclaw/repo.py:
+      Paul Gauthier: 26
+    pyclaw/tests/test_editblock.py:
+      Paul Gauthier: 26
+  grand_total:
+    Dustin Miller: 14
+    Krazer: 73
+    Paul Gauthier: 253
+    Paul Gauthier (pyclaw): 21
+  start_tag: v0.39.0
+  total_lines: 361
+- pyclaw_percentage: 5.86
+  pyclaw_total: 15
+  end_date: '2024-07-01'
+  end_tag: v0.41.0
+  file_counts:
+    .github/workflows/release.yml:
+      Paul Gauthier: 1
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 10
+      Paul Gauthier (pyclaw): 6
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 125
+      Paul Gauthier (pyclaw): 2
+    pyclaw/coders/wholefile_coder.py:
+      Paul Gauthier: 3
+    pyclaw/commands.py:
+      Amir Elaguizy (pyclaw): 6
+      Paul Gauthier: 1
+    pyclaw/gui.py:
+      Paul Gauthier: 4
+    pyclaw/main.py:
+      Paul Gauthier: 11
+      Paul Gauthier (pyclaw): 1
+    pyclaw/mdstream.py:
+      Paul Gauthier: 1
+    pyclaw/models.py:
+      Mitsuki Ogasahara: 3
+      Paul Gauthier: 38
+    pyclaw/repo.py:
+      Paul Gauthier: 7
+    pyclaw/repomap.py:
+      Paul Gauthier: 12
+    pyclaw/sendchat.py:
+      Paul Gauthier: 2
+    pyclaw/tests/test_coder.py:
+      Paul Gauthier: 10
+    pyclaw/tests/test_editblock.py:
+      Paul Gauthier: 2
+    pyclaw/tests/test_wholefile.py:
+      Paul Gauthier: 4
+    scripts/update-docs.sh:
+      Paul Gauthier: 3
+    setup.py:
+      Paul Gauthier: 3
+  grand_total:
+    Amir Elaguizy (pyclaw): 6
+    Mitsuki Ogasahara: 3
+    Paul Gauthier: 238
+    Paul Gauthier (pyclaw): 9
+  start_tag: v0.40.0
+  total_lines: 256
+- pyclaw_percentage: 2.29
+  pyclaw_total: 7
+  end_date: '2024-07-04'
+  end_tag: v0.42.0
+  file_counts:
+    .github/workflows/pages.yml:
+      Paul Gauthier: 14
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 6
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 10
+      Paul Gauthier (pyclaw): 7
+    pyclaw/commands.py:
+      Paul Gauthier: 31
+    pyclaw/history.py:
+      Paul Gauthier: 5
+    pyclaw/io.py:
+      Paul Gauthier: 32
+    pyclaw/llm.py:
+      Paul Gauthier: 18
+    pyclaw/main.py:
+      Paul Gauthier: 26
+    pyclaw/models.py:
+      Paul Gauthier: 78
+    pyclaw/repomap.py:
+      Paul Gauthier: 4
+    pyclaw/scrape.py:
+      Paul Gauthier: 8
+    pyclaw/sendchat.py:
+      Paul Gauthier: 45
+    pyclaw/tests/test_sendchat.py:
+      Paul Gauthier: 1
+    pyclaw/versioncheck.py:
+      Paul Gauthier: 12
+    pyclaw/voice.py:
+      Paul Gauthier: 6
+    scripts/jekyll_run.sh:
+      Paul Gauthier: 2
+  grand_total:
+    Paul Gauthier: 299
+    Paul Gauthier (pyclaw): 7
+  start_tag: v0.41.0
+  total_lines: 306
+- pyclaw_percentage: 9.82
+  pyclaw_total: 38
+  end_date: '2024-07-07'
+  end_tag: v0.43.0
+  file_counts:
+    .github/workflows/docker-build-test.yml:
+      Paul Gauthier: 2
+    .github/workflows/pages.yml:
+      Paul Gauthier: 4
+    .github/workflows/ubuntu-tests.yml:
+      Paul Gauthier: 2
+    .github/workflows/windows-tests.yml:
+      Paul Gauthier: 2
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 2
+    pyclaw/args_formatter.py:
+      Paul Gauthier: 4
+    pyclaw/coders/__init__.py:
+      Paul Gauthier: 2
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 45
+    pyclaw/coders/help_coder.py:
+      Paul Gauthier: 17
+    pyclaw/commands.py:
+      Paul Gauthier: 69
+      Paul Gauthier (pyclaw): 5
+    pyclaw/help.py:
+      Paul Gauthier: 114
+      Paul Gauthier (pyclaw): 6
+    pyclaw/help_pats.py:
+      Paul Gauthier: 10
+    pyclaw/llm.py:
+      Paul Gauthier: 1
+    pyclaw/main.py:
+      Paul Gauthier: 36
+    pyclaw/repomap.py:
+      Paul Gauthier: 14
+    pyclaw/tests/test_commands.py:
+      Paul Gauthier: 1
+    pyclaw/tests/test_help.py:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 24
+    pyclaw/versioncheck.py:
+      Paul Gauthier: 2
+    scripts/jekyll_run.sh:
+      Paul Gauthier: 1
+    scripts/update-docs.sh:
+      Paul Gauthier: 7
+    setup.py:
+      Paul Gauthier: 6
+      Paul Gauthier (pyclaw): 3
+  grand_total:
+    Paul Gauthier: 349
+    Paul Gauthier (pyclaw): 38
+  start_tag: v0.42.0
+  total_lines: 387
+- pyclaw_percentage: 27.04
+  pyclaw_total: 159
+  end_date: '2024-07-16'
+  end_tag: v0.44.0
+  file_counts:
+    .github/workflows/ubuntu-tests.yml:
+      Paul Gauthier: 3
+    .github/workflows/windows-tests.yml:
+      Paul Gauthier: 4
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 5
+    pyclaw/args_formatter.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier (pyclaw): 1
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 1
+    pyclaw/commands.py:
+      Paul Gauthier: 17
+      Paul Gauthier (pyclaw): 10
+    pyclaw/help.py:
+      Paul Gauthier: 20
+    pyclaw/main.py:
+      Paul Gauthier: 22
+    pyclaw/models.py:
+      Paul Gauthier: 11
+    pyclaw/scrape.py:
+      Paul Gauthier: 54
+    pyclaw/utils.py:
+      Paul Gauthier: 78
+      Paul Gauthier (pyclaw): 16
+    pyclaw/versioncheck.py:
+      Paul Gauthier: 28
+    pyclaw/voice.py:
+      Paul Gauthier: 6
+    benchmark/Dockerfile:
+      Paul Gauthier: 3
+    docker/Dockerfile:
+      Paul Gauthier: 14
+      Paul Gauthier (pyclaw): 1
+    scripts/blame.py:
+      Paul Gauthier: 38
+      Paul Gauthier (pyclaw): 49
+    scripts/pip-compile.sh:
+      Paul Gauthier: 18
+    scripts/update-docs.sh:
+      Paul Gauthier: 2
+    setup.py:
+      Paul Gauthier: 26
+      Paul Gauthier (pyclaw): 1
+    tests/basic/test_coder.py:
+      Paul Gauthier: 25
+      Paul Gauthier (pyclaw): 37
+    tests/browser/test_browser.py:
+      Paul Gauthier: 13
+      Paul Gauthier (pyclaw): 18
+    tests/help/test_help.py:
+      Paul Gauthier: 23
+    tests/scrape/test_scrape.py:
+      Paul Gauthier: 16
+      Paul Gauthier (pyclaw): 26
+  grand_total:
+    Paul Gauthier: 429
+    Paul Gauthier (pyclaw): 159
+  start_tag: v0.43.0
+  total_lines: 588
+- pyclaw_percentage: 48.43
+  pyclaw_total: 123
+  end_date: '2024-07-18'
+  end_tag: v0.45.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 3
+    pyclaw/commands.py:
+      Paul Gauthier: 18
+      Paul Gauthier (pyclaw): 4
+    pyclaw/main.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 5
+    pyclaw/models.py:
+      Paul Gauthier: 16
+    pyclaw/repomap.py:
+      Paul Gauthier: 1
+    pyclaw/scrape.py:
+      Paul Gauthier: 9
+    pyclaw/versioncheck.py:
+      Paul Gauthier: 14
+    tests/basic/test_coder.py:
+      Paul Gauthier: 15
+      Paul Gauthier (pyclaw): 25
+    tests/basic/test_commands.py:
+      Paul Gauthier: 22
+      Paul Gauthier (pyclaw): 81
+    tests/basic/test_main.py:
+      Paul Gauthier: 27
+      Paul Gauthier (pyclaw): 5
+  grand_total:
+    Paul Gauthier: 131
+    Paul Gauthier (pyclaw): 123
+  start_tag: v0.44.0
+  total_lines: 254
+- pyclaw_percentage: 53.3
+  pyclaw_total: 339
+  end_date: '2024-07-29'
+  end_tag: v0.46.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier (pyclaw): 3
+    pyclaw/coders/__init__.py:
+      Paul Gauthier: 2
+      Your Name: 1
+    pyclaw/coders/ask_coder.py:
+      Your Name: 9
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 17
+      Paul Gauthier (pyclaw): 45
+      Your Name: 27
+      Your Name (pyclaw): 6
+    pyclaw/coders/editblock_coder.py:
+      Your Name (pyclaw): 2
+    pyclaw/coders/editblock_fenced_coder.py:
+      Your Name (pyclaw): 2
+    pyclaw/coders/help_coder.py:
+      Your Name: 1
+      Your Name (pyclaw): 1
+    pyclaw/coders/udiff_coder.py:
+      Your Name (pyclaw): 2
+    pyclaw/coders/wholefile_coder.py:
+      Your Name (pyclaw): 2
+    pyclaw/commands.py:
+      Paul Gauthier: 43
+      Your Name: 28
+      Your Name (pyclaw): 34
+    pyclaw/io.py:
+      Paul Gauthier: 3
+    pyclaw/llm.py:
+      Paul Gauthier: 11
+    pyclaw/main.py:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 8
+      Your Name: 6
+      Your Name (pyclaw): 1
+    pyclaw/models.py:
+      Paul Gauthier: 24
+    pyclaw/queries/tree-sitter-elm-tags.scm:
+      Charles Joachim: 4
+    pyclaw/repomap.py:
+      Paul Gauthier: 12
+    pyclaw/scrape.py:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 32
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 11
+      Paul Gauthier (pyclaw): 85
+    benchmark/Dockerfile:
+      Your Name: 1
+    tests/basic/test_coder.py:
+      Paul Gauthier: 6
+      Paul Gauthier (pyclaw): 5
+    tests/basic/test_repo.py:
+      Paul Gauthier (pyclaw): 13
+    tests/basic/test_repomap.py:
+      Paul Gauthier: 70
+      Paul Gauthier (pyclaw): 25
+    tests/scrape/test_scrape.py:
+      Paul Gauthier: 14
+      Paul Gauthier (pyclaw): 73
+  grand_total:
+    Charles Joachim: 4
+    Paul Gauthier: 220
+    Paul Gauthier (pyclaw): 289
+    Your Name: 73
+    Your Name (pyclaw): 50
+  start_tag: v0.45.0
+  total_lines: 636
+- pyclaw_percentage: 58.42
+  pyclaw_total: 392
+  end_date: '2024-07-31'
+  end_tag: v0.47.0
+  file_counts:
+    .github/workflows/docker-release.yml:
+      Paul Gauthier (pyclaw): 35
+    .github/workflows/release.yml:
+      Paul Gauthier (pyclaw): 2
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 6
+      Paul Gauthier (pyclaw): 5
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 8
+      Paul Gauthier (pyclaw): 3
+    pyclaw/commands.py:
+      Paul Gauthier: 23
+      Paul Gauthier (pyclaw): 4
+    pyclaw/history.py:
+      Paul Gauthier: 16
+      Paul Gauthier (pyclaw): 6
+    pyclaw/io.py:
+      Paul Gauthier: 27
+      Paul Gauthier (pyclaw): 8
+    pyclaw/linter.py:
+      Paul Gauthier: 14
+      Paul Gauthier (pyclaw): 1
+    pyclaw/main.py:
+      Paul Gauthier: 9
+      Paul Gauthier (pyclaw): 1
+    pyclaw/queries/tree-sitter-ocaml-tags.scm:
+      Paul Gauthier: 12
+      Paul Gauthier (pyclaw): 18
+    pyclaw/repo.py:
+      Paul Gauthier (pyclaw): 4
+    pyclaw/repomap.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 5
+    pyclaw/scrape.py:
+      Paul Gauthier: 2
+    pyclaw/sendchat.py:
+      Paul Gauthier (pyclaw): 2
+    pyclaw/utils.py:
+      Paul Gauthier: 7
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 11
+      Paul Gauthier (pyclaw): 12
+    docker/Dockerfile:
+      Paul Gauthier: 19
+      Paul Gauthier (pyclaw): 21
+    scripts/blame.py:
+      Paul Gauthier: 64
+      Paul Gauthier (pyclaw): 110
+    scripts/update-blame.sh:
+      Paul Gauthier: 6
+    scripts/update-docs.sh:
+      Paul Gauthier: 1
+    tests/basic/test_coder.py:
+      Paul Gauthier: 33
+      Paul Gauthier (pyclaw): 4
+    tests/basic/test_commands.py:
+      Paul Gauthier: 11
+      Paul Gauthier (pyclaw): 30
+    tests/basic/test_history.py:
+      Paul Gauthier (pyclaw): 109
+    tests/basic/test_repo.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 12
+    tests/basic/test_repomap.py:
+      Paul Gauthier: 1
+  grand_total:
+    Paul Gauthier: 279
+    Paul Gauthier (pyclaw): 392
+  start_tag: v0.46.0
+  total_lines: 671
+- pyclaw_percentage: 45.1
+  pyclaw_total: 276
+  end_date: '2024-08-06'
+  end_tag: v0.48.0
+  file_counts:
+    .github/workflows/ubuntu-tests.yml:
+      paul-gauthier: 1
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 6
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 61
+      Paul Gauthier (pyclaw): 41
+    pyclaw/commands.py:
+      Paul Gauthier: 13
+      Paul Gauthier (pyclaw): 24
+    pyclaw/history.py:
+      Paul Gauthier: 2
+    pyclaw/main.py:
+      Paul Gauthier: 21
+      Paul Gauthier (pyclaw): 30
+    pyclaw/models.py:
+      Paul Gauthier: 9
+      Paul Gauthier (pyclaw): 7
+      Thinh Nguyen: 1
+    pyclaw/repo.py:
+      Paul Gauthier: 42
+      Paul Gauthier (pyclaw): 23
+    pyclaw/repomap.py:
+      Paul Gauthier: 62
+      Paul Gauthier (pyclaw): 2
+    pyclaw/sendchat.py:
+      Paul Gauthier: 26
+      Paul Gauthier (pyclaw): 2
+    pyclaw/utils.py:
+      Paul Gauthier: 29
+      Paul Gauthier (pyclaw): 4
+    scripts/blame.py:
+      Paul Gauthier (pyclaw): 2
+    tests/basic/test_coder.py:
+      Paul Gauthier: 13
+    tests/basic/test_commands.py:
+      Paul Gauthier: 19
+      Paul Gauthier (pyclaw): 18
+    tests/basic/test_history.py:
+      Paul Gauthier: 2
+    tests/basic/test_main.py:
+      Paul Gauthier: 25
+      Paul Gauthier (pyclaw): 42
+    tests/basic/test_repo.py:
+      Paul Gauthier: 8
+      Paul Gauthier (pyclaw): 36
+    tests/basic/test_scripting.py:
+      Paul Gauthier (pyclaw): 39
+  grand_total:
+    Paul Gauthier: 334
+    Paul Gauthier (pyclaw): 276
+    Thinh Nguyen: 1
+    paul-gauthier: 1
+  start_tag: v0.47.0
+  total_lines: 612
+- pyclaw_percentage: 59.65
+  pyclaw_total: 473
+  end_date: '2024-08-10'
+  end_tag: v0.49.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 9
+      Paul Gauthier (pyclaw): 13
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 91
+      Paul Gauthier (pyclaw): 44
+    pyclaw/commands.py:
+      Paul Gauthier: 34
+      Paul Gauthier (pyclaw): 108
+    pyclaw/io.py:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 24
+    pyclaw/llm.py:
+      Paul Gauthier (pyclaw): 5
+    pyclaw/main.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 4
+    pyclaw/models.py:
+      Paul Gauthier: 34
+      Paul Gauthier (pyclaw): 3
+    pyclaw/repo.py:
+      Paul Gauthier: 8
+      Paul Gauthier (pyclaw): 13
+    pyclaw/repomap.py:
+      Paul Gauthier: 11
+      Paul Gauthier (pyclaw): 23
+    pyclaw/scrape.py:
+      Paul Gauthier (pyclaw): 17
+    pyclaw/sendchat.py:
+      Paul Gauthier: 21
+    pyclaw/urls.py:
+      Paul Gauthier: 1
+    pyclaw/utils.py:
+      Paul Gauthier (pyclaw): 11
+    pyclaw/versioncheck.py:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 11
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 11
+      Paul Gauthier (pyclaw): 11
+    docker/Dockerfile:
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 2
+    tests/basic/test_coder.py:
+      Paul Gauthier (pyclaw): 7
+    tests/basic/test_commands.py:
+      Paul Gauthier: 35
+      Paul Gauthier (pyclaw): 93
+    tests/basic/test_editblock.py:
+      Paul Gauthier (pyclaw): 1
+    tests/basic/test_main.py:
+      Paul Gauthier (pyclaw): 33
+    tests/basic/test_sendchat.py:
+      Paul Gauthier: 47
+    tests/basic/test_wholefile.py:
+      Paul Gauthier (pyclaw): 1
+    tests/scrape/test_scrape.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 49
+  grand_total:
+    Paul Gauthier: 320
+    Paul Gauthier (pyclaw): 473
+  start_tag: v0.48.0
+  total_lines: 793
+- pyclaw_percentage: 65.52
+  pyclaw_total: 209
+  end_date: '2024-08-13'
+  end_tag: v0.50.0
+  file_counts:
+    .github/workflows/release.yml:
+      Branch Vincent: 2
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier (pyclaw): 10
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 24
+      Paul Gauthier (pyclaw): 32
+    pyclaw/commands.py:
+      Amir Elaguizy (pyclaw): 13
+      Paul Gauthier: 28
+      Paul Gauthier (pyclaw): 18
+    pyclaw/io.py:
+      Paul Gauthier: 1
+    pyclaw/main.py:
+      Paul Gauthier: 9
+      Paul Gauthier (pyclaw): 2
+    pyclaw/models.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 4
+    pyclaw/scrape.py:
+      Paul Gauthier (pyclaw): 26
+    pyclaw/sendchat.py:
+      Paul Gauthier (pyclaw): 1
+    pyclaw/utils.py:
+      Paul Gauthier: 1
+    pyclaw/versioncheck.py:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 1
+    scripts/versionbump.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 34
+    tests/basic/test_coder.py:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 19
+    tests/basic/test_commands.py:
+      Paul Gauthier: 18
+      Paul Gauthier (pyclaw): 41
+    tests/basic/test_main.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 8
+    tests/help/test_help.py:
+      Paul Gauthier: 7
+  grand_total:
+    Amir Elaguizy (pyclaw): 13
+    Branch Vincent: 2
+    Paul Gauthier: 108
+    Paul Gauthier (pyclaw): 196
+  start_tag: v0.49.0
+  total_lines: 319
+- pyclaw_percentage: 62.86
+  pyclaw_total: 689
+  end_date: '2024-08-20'
+  end_tag: v0.51.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 10
+    pyclaw/coders/__init__.py:
+      Paul Gauthier: 4
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 172
+      Paul Gauthier (pyclaw): 51
+    pyclaw/coders/single_wholefile_func_coder.py:
+      Paul Gauthier: 29
+    pyclaw/commands.py:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 5
+    pyclaw/llm.py:
+      Paul Gauthier: 2
+    pyclaw/main.py:
+      Paul Gauthier: 6
+      Paul Gauthier (pyclaw): 16
+    pyclaw/models.py:
+      Paul Gauthier: 45
+      Paul Gauthier (pyclaw): 2
+    pyclaw/repomap.py:
+      Paul Gauthier: 16
+      Paul Gauthier (pyclaw): 58
+    pyclaw/sendchat.py:
+      Paul Gauthier: 3
+    pyclaw/utils.py:
+      Paul Gauthier (pyclaw): 6
+    pyclaw/website/_includes/code-in-json-benchmark.js:
+      Paul Gauthier: 24
+      Paul Gauthier (pyclaw): 141
+    pyclaw/website/_includes/code-in-json-syntax.js:
+      Paul Gauthier: 42
+      Paul Gauthier (pyclaw): 97
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 1
+    benchmark/benchmark.py:
+      Paul Gauthier: 7
+    benchmark/over_time.py:
+      Paul Gauthier: 14
+      Paul Gauthier (pyclaw): 57
+    docker/Dockerfile:
+      Paul Gauthier: 10
+    scripts/blame.py:
+      Paul Gauthier (pyclaw): 17
+    tests/basic/test_commands.py:
+      Paul Gauthier: 5
+    tests/basic/test_main.py:
+      Paul Gauthier: 6
+      Paul Gauthier (pyclaw): 125
+    tests/basic/test_repomap.py:
+      Paul Gauthier: 15
+      Paul Gauthier (pyclaw): 104
+  grand_total:
+    Paul Gauthier: 407
+    Paul Gauthier (pyclaw): 689
+  start_tag: v0.50.0
+  total_lines: 1096
+- pyclaw_percentage: 66.9
+  pyclaw_total: 479
+  end_date: '2024-08-23'
+  end_tag: v0.52.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 6
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 80
+      Paul Gauthier (pyclaw): 23
+    pyclaw/coders/chat_chunks.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 3
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 45
+      Paul Gauthier (pyclaw): 68
+    pyclaw/coders/wholefile_coder.py:
+      Paul Gauthier: 1
+    pyclaw/commands.py:
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 42
+      pcamp: 1
+    pyclaw/io.py:
+      Paul Gauthier: 40
+      Paul Gauthier (pyclaw): 41
+    pyclaw/main.py:
+      Paul Gauthier: 2
+    pyclaw/models.py:
+      Paul Gauthier: 30
+    pyclaw/repomap.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 5
+    pyclaw/utils.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 9
+    pyclaw/versioncheck.py:
+      Paul Gauthier: 2
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 1
+    benchmark/benchmark.py:
+      Paul Gauthier: 1
+    scripts/blame.py:
+      Paul Gauthier: 1
+    tests/basic/test_commands.py:
+      Paul Gauthier (pyclaw): 100
+    tests/basic/test_editblock.py:
+      Paul Gauthier (pyclaw): 1
+    tests/basic/test_find_or_blocks.py:
+      Paul Gauthier: 11
+      Paul Gauthier (pyclaw): 106
+    tests/basic/test_io.py:
+      Paul Gauthier (pyclaw): 32
+    tests/basic/test_main.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 43
+    tests/basic/test_wholefile.py:
+      Paul Gauthier: 8
+  grand_total:
+    Paul Gauthier: 236
+    Paul Gauthier (pyclaw): 479
+    pcamp: 1
+  start_tag: v0.51.0
+  total_lines: 716
+- pyclaw_percentage: 62.33
+  pyclaw_total: 455
+  end_date: '2024-08-27'
+  end_tag: v0.53.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 10
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 57
+      Paul Gauthier (pyclaw): 18
+    pyclaw/coders/chat_chunks.py:
+      Paul Gauthier (pyclaw): 9
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 44
+      Paul Gauthier (pyclaw): 6
+    pyclaw/commands.py:
+      Paul Gauthier: 19
+    pyclaw/history.py:
+      Paul Gauthier (pyclaw): 3
+    pyclaw/io.py:
+      Paul Gauthier: 44
+      Paul Gauthier (pyclaw): 22
+    pyclaw/main.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 9
+    pyclaw/models.py:
+      Paul Gauthier: 50
+      Paul Gauthier (pyclaw): 21
+    pyclaw/repo.py:
+      Paul Gauthier (pyclaw): 3
+    pyclaw/repomap.py:
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 1
+    pyclaw/sendchat.py:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 11
+    pyclaw/utils.py:
+      Paul Gauthier: 12
+      Paul Gauthier (pyclaw): 9
+    pyclaw/versioncheck.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 10
+    scripts/versionbump.py:
+      Paul Gauthier: 1
+    tests/basic/test_commands.py:
+      Paul Gauthier: 12
+    tests/basic/test_editblock.py:
+      Paul Gauthier: 6
+      Paul Gauthier (pyclaw): 26
+    tests/basic/test_io.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 66
+    tests/basic/test_main.py:
+      Paul Gauthier: 2
+    tests/basic/test_models.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 42
+    tests/basic/test_repo.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 8
+    tests/basic/test_repomap.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 63
+    tests/fixtures/sample-code-base/sample.js:
+      Paul Gauthier (pyclaw): 50
+    tests/fixtures/sample-code-base/sample.py:
+      Paul Gauthier (pyclaw): 68
+  grand_total:
+    Paul Gauthier: 275
+    Paul Gauthier (pyclaw): 455
+  start_tag: v0.52.0
+  total_lines: 730
+- pyclaw_percentage: 70.0
+  pyclaw_total: 224
+  end_date: '2024-08-28'
+  end_tag: v0.54.0
+  file_counts:
+    .github/workflows/docker-build-test.yml:
+      Paul Gauthier (pyclaw): 1
+    .github/workflows/ubuntu-tests.yml:
+      Paul Gauthier (pyclaw): 1
+    .github/workflows/windows-tests.yml:
+      Paul Gauthier (pyclaw): 1
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 12
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 25
+      Paul Gauthier (pyclaw): 12
+    pyclaw/commands.py:
+      Paul Gauthier: 12
+      Paul Gauthier (pyclaw): 4
+    pyclaw/io.py:
+      Paul Gauthier: 28
+    pyclaw/main.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 6
+    pyclaw/models.py:
+      Paul Gauthier (pyclaw): 11
+    pyclaw/run_cmd.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 70
+    pyclaw/utils.py:
+      Paul Gauthier (pyclaw): 15
+    pyclaw/versioncheck.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 13
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 1
+    tests/basic/test_coder.py:
+      Paul Gauthier: 14
+      Paul Gauthier (pyclaw): 49
+    tests/basic/test_io.py:
+      Paul Gauthier: 4
+    tests/basic/test_main.py:
+      Antti Kaihola: 4
+      Paul Gauthier (pyclaw): 29
+    tests/scrape/test_scrape.py:
+      Paul Gauthier: 1
+  grand_total:
+    Antti Kaihola: 4
+    Paul Gauthier: 92
+    Paul Gauthier (pyclaw): 224
+  start_tag: v0.53.0
+  total_lines: 320
+- pyclaw_percentage: 52.4
+  pyclaw_total: 787
+  end_date: '2024-09-04'
+  end_tag: v0.55.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 2
+    pyclaw/args.py:
+      Paul Gauthier (pyclaw): 7
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 63
+      Paul Gauthier (pyclaw): 42
+    pyclaw/coders/editblock_coder.py:
+      Nikolay Sedelnikov: 8
+    pyclaw/coders/editblock_func_coder.py:
+      Antti Kaihola: 2
+    pyclaw/coders/search_replace.py:
+      Paul Gauthier: 2
+    pyclaw/coders/wholefile_coder.py:
+      Paul Gauthier: 16
+    pyclaw/commands.py:
+      Antti Kaihola: 7
+      Paul Gauthier: 83
+      Paul Gauthier (pyclaw): 27
+    pyclaw/format_settings.py:
+      Paul Gauthier (pyclaw): 2
+    pyclaw/gui.py:
+      Paul Gauthier: 4
+    pyclaw/io.py:
+      Paul Gauthier: 57
+      Paul Gauthier (pyclaw): 13
+    pyclaw/linter.py:
+      Paul Gauthier: 5
+    pyclaw/llm.py:
+      Paul Gauthier: 2
+    pyclaw/main.py:
+      Paul Gauthier: 86
+      Paul Gauthier (pyclaw): 22
+    pyclaw/models.py:
+      Paul Gauthier: 24
+      Paul Gauthier (pyclaw): 2
+    pyclaw/repo.py:
+      Paul Gauthier: 85
+    pyclaw/repomap.py:
+      Paul Gauthier: 32
+      Paul Gauthier (pyclaw): 4
+    pyclaw/report.py:
+      Paul Gauthier: 77
+      Paul Gauthier (pyclaw): 120
+    pyclaw/run_cmd.py:
+      Paul Gauthier: 17
+      Paul Gauthier (pyclaw): 24
+    pyclaw/scrape.py:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 8
+    pyclaw/special.py:
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 197
+    pyclaw/urls.py:
+      Paul Gauthier (pyclaw): 1
+    pyclaw/utils.py:
+      Paul Gauthier: 31
+      Paul Gauthier (pyclaw): 29
+    pyclaw/versioncheck.py:
+      Paul Gauthier: 32
+      Paul Gauthier (pyclaw): 6
+    pyclaw/voice.py:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 9
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 1
+    scripts/versionbump.py:
+      Paul Gauthier: 9
+    tests/basic/test_coder.py:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 105
+    tests/basic/test_editblock.py:
+      Antti Kaihola: 3
+      Nikolay Sedelnikov: 37
+    tests/basic/test_io.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 15
+    tests/basic/test_main.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 10
+    tests/basic/test_models.py:
+      Paul Gauthier (pyclaw): 4
+    tests/basic/test_repomap.py:
+      Paul Gauthier (pyclaw): 42
+    tests/basic/test_run_cmd.py:
+      Paul Gauthier (pyclaw): 11
+    tests/basic/test_special.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 74
+    tests/scrape/test_scrape.py:
+      Paul Gauthier (pyclaw): 11
+  grand_total:
+    Antti Kaihola: 12
+    Nikolay Sedelnikov: 45
+    Paul Gauthier: 658
+    Paul Gauthier (pyclaw): 787
+  start_tag: v0.54.0
+  total_lines: 1502
+- pyclaw_percentage: 55.4
+  pyclaw_total: 154
+  end_date: '2024-09-09'
+  end_tag: v0.56.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 6
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 14
+      Paul Gauthier (pyclaw): 10
+    pyclaw/commands.py:
+      Paul Gauthier: 8
+      Paul Gauthier (pyclaw): 6
+    pyclaw/io.py:
+      Paul Gauthier: 5
+    pyclaw/linter.py:
+      Paul Gauthier: 6
+      Paul Gauthier (pyclaw): 4
+      fry69: 12
+    pyclaw/main.py:
+      Paul Gauthier: 35
+      Paul Gauthier (pyclaw): 48
+    pyclaw/models.py:
+      Paul Gauthier: 2
+      fry69: 3
+    pyclaw/repo.py:
+      Paul Gauthier: 16
+    pyclaw/repomap.py:
+      Paul Gauthier: 13
+    pyclaw/report.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 20
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 1
+    benchmark/benchmark.py:
+      Paul Gauthier: 1
+    tests/basic/test_linter.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 51
+    tests/basic/test_main.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 9
+  grand_total:
+    Paul Gauthier: 109
+    Paul Gauthier (pyclaw): 154
+    fry69: 15
+  start_tag: v0.55.0
+  total_lines: 278
+- pyclaw_percentage: 70.36
+  pyclaw_total: 406
+  end_date: '2024-09-21'
+  end_tag: v0.57.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args_formatter.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 1
+    pyclaw/coders/base_coder.py:
+      Krazer: 1
+      Paul Gauthier: 17
+      Paul Gauthier (pyclaw): 2
+    pyclaw/coders/chat_chunks.py:
+      Paul Gauthier: 5
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier (pyclaw): 27
+    pyclaw/commands.py:
+      Krazer: 3
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 34
+    pyclaw/io.py:
+      Krazer: 27
+      Paul Gauthier: 8
+      Paul Gauthier (pyclaw): 42
+    pyclaw/main.py:
+      Krazer: 2
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 8
+    pyclaw/models.py:
+      Jay Alammar: 1
+      Jay Alammar (pyclaw): 13
+      Paul Gauthier: 43
+      Paul Gauthier (pyclaw): 46
+    pyclaw/repo.py:
+      Paul Gauthier: 3
+    pyclaw/run_cmd.py:
+      Paul Gauthier: 8
+      Paul Gauthier (pyclaw): 33
+    pyclaw/sendchat.py:
+      Paul Gauthier: 3
+    pyclaw/utils.py:
+      Paul Gauthier: 2
+    pyclaw/website/docs/leaderboards/index.md:
+      Anjor Kanekar: 1
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 12
+    benchmark/benchmark.py:
+      Paul Gauthier: 4
+    scripts/issues.py:
+      Paul Gauthier: 10
+      Paul Gauthier (pyclaw): 123
+    scripts/versionbump.py:
+      Paul Gauthier (pyclaw): 8
+    tests/basic/test_coder.py:
+      Paul Gauthier: 1
+    tests/basic/test_editblock.py:
+      Christian Clauss: 2
+    tests/basic/test_io.py:
+      Paul Gauthier (pyclaw): 37
+    tests/basic/test_main.py:
+      Paul Gauthier: 18
+      Paul Gauthier (pyclaw): 20
+  grand_total:
+    Anjor Kanekar: 1
+    Christian Clauss: 2
+    Jay Alammar: 1
+    Jay Alammar (pyclaw): 13
+    Krazer: 33
+    Paul Gauthier: 134
+    Paul Gauthier (pyclaw): 393
+  start_tag: v0.56.0
+  total_lines: 577
+- pyclaw_percentage: 48.74
+  pyclaw_total: 658
+  end_date: '2024-09-29'
+  end_tag: v0.58.0
+  file_counts:
+    .github/workflows/docker-build-test.yml:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 11
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Mike Bailey: 7
+      Paul Gauthier: 8
+      Paul Gauthier (pyclaw): 55
+      Stein Martin Hustad: 17
+      fry69: 2
+    pyclaw/coders/__init__.py:
+      Paul Gauthier: 6
+      Paul Gauthier (pyclaw): 2
+    pyclaw/coders/architect_coder.py:
+      Paul Gauthier: 40
+      Paul Gauthier (pyclaw): 3
+    pyclaw/coders/base_coder.py:
+      Jonathan Ellis: 1
+      Paul Gauthier: 32
+      Paul Gauthier (pyclaw): 8
+    pyclaw/coders/editor_editblock_coder.py:
+      Paul Gauthier: 6
+      Paul Gauthier (pyclaw): 1
+    pyclaw/coders/editor_whole_coder.py:
+      Paul Gauthier: 7
+    pyclaw/coders/wholefile_coder.py:
+      Paul Gauthier: 2
+    pyclaw/commands.py:
+      Jonathan Ellis: 1
+      Mike Bailey: 1
+      Paul Gauthier: 15
+      Paul Gauthier (pyclaw): 78
+      fry69: 2
+    pyclaw/help.py:
+      Paul Gauthier: 27
+      Paul Gauthier (pyclaw): 7
+    pyclaw/history.py:
+      Paul Gauthier: 1
+    pyclaw/io.py:
+      Paul Gauthier: 39
+      Paul Gauthier (pyclaw): 62
+      Stein Martin Hustad: 5
+      fry69: 10
+    pyclaw/linter.py:
+      Paul Gauthier: 6
+    pyclaw/main.py:
+      Paul Gauthier: 13
+      Paul Gauthier (pyclaw): 6
+      Stein Martin Hustad: 4
+      fry69: 1
+      rti: 1
+    pyclaw/models.py:
+      Paul Gauthier: 58
+      Paul Gauthier (pyclaw): 85
+    pyclaw/repo.py:
+      Paul Gauthier: 16
+      Paul Gauthier (pyclaw): 2
+    pyclaw/repomap.py:
+      Paul Gauthier: 5
+    pyclaw/scrape.py:
+      Paul Gauthier (pyclaw): 3
+    pyclaw/sendchat.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 5
+    pyclaw/utils.py:
+      Paul Gauthier: 4
+    pyclaw/versioncheck.py:
+      Paul Gauthier: 2
+    pyclaw/voice.py:
+      Mike Bailey: 17
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 10
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 92
+    benchmark/benchmark.py:
+      Paul Gauthier: 25
+      Paul Gauthier (pyclaw): 29
+      fry69: 3
+    scripts/issues.py:
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 45
+    scripts/update-docs.sh:
+      Paul Gauthier: 1
+    scripts/yank-old-versions.py:
+      Paul Gauthier (pyclaw): 51
+    tests/basic/test_commands.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 98
+    tests/basic/test_io.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 97
+    tests/basic/test_main.py:
+      Paul Gauthier: 2
+    tests/basic/test_models.py:
+      Paul Gauthier: 4
+    tests/basic/test_sanity_check_repo.py:
+      fry69: 179
+    tests/basic/test_wholefile.py:
+      Paul Gauthier: 16
+  grand_total:
+    Jonathan Ellis: 2
+    Mike Bailey: 25
+    Paul Gauthier: 441
+    Paul Gauthier (pyclaw): 658
+    Stein Martin Hustad: 26
+    fry69: 197
+    rti: 1
+  start_tag: v0.57.0
+  total_lines: 1350
+- pyclaw_percentage: 72.14
+  pyclaw_total: 145
+  end_date: '2024-10-04'
+  end_tag: v0.59.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 6
+    pyclaw/args_formatter.py:
+      Paul Gauthier: 4
+    pyclaw/coders/architect_coder.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 6
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 1
+    pyclaw/commands.py:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 49
+    pyclaw/gui.py:
+      Paul Gauthier: 2
+    pyclaw/main.py:
+      Paul Gauthier: 10
+      Paul Gauthier (pyclaw): 4
+    pyclaw/models.py:
+      Paul Gauthier (pyclaw): 12
+    pyclaw/repomap.py:
+      Paul Gauthier: 9
+      Paul Gauthier (pyclaw): 3
+    pyclaw/urls.py:
+      Paul Gauthier: 2
+    pyclaw/versioncheck.py:
+      Paul Gauthier: 1
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 4
+    scripts/issues.py:
+      Paul Gauthier: 1
+    scripts/update-docs.sh:
+      Paul Gauthier: 2
+    tests/basic/test_commands.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 53
+    tests/basic/test_models.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 18
+    tests/basic/test_sanity_check_repo.py:
+      Paul Gauthier: 1
+    tests/help/test_help.py:
+      Paul Gauthier: 1
+  grand_total:
+    Paul Gauthier: 56
+    Paul Gauthier (pyclaw): 145
+  start_tag: v0.58.0
+  total_lines: 201
+- pyclaw_percentage: 51.47
+  pyclaw_total: 140
+  end_date: '2024-10-22'
+  end_tag: v0.60.0
+  file_counts:
+    .github/workflows/close-stale.yml:
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 19
+    .github/workflows/pages.yml:
+      Paul Gauthier: 3
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 1
+      fry69: 2
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 2
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier (pyclaw): 3
+    pyclaw/commands.py:
+      Paul Gauthier: 1
+    pyclaw/help.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 33
+    pyclaw/io.py:
+      Jonathan Ellis: 10
+      Paul Gauthier: 7
+    pyclaw/main.py:
+      Paul Gauthier: 20
+      Paul Gauthier (pyclaw): 39
+    pyclaw/models.py:
+      Paul Gauthier: 18
+      Sven Grunewaldt: 10
+      fry69: 16
+    pyclaw/resources/__init__.py:
+      Paul Gauthier: 3
+    pyclaw/sendchat.py:
+      Paul Gauthier: 3
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 1
+    tests/basic/test_editblock.py:
+      Paul Gauthier: 23
+    tests/basic/test_main.py:
+      Paul Gauthier: 1
+    tests/help/test_help.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 46
+  grand_total:
+    Jonathan Ellis: 10
+    Paul Gauthier: 94
+    Paul Gauthier (pyclaw): 140
+    Sven Grunewaldt: 10
+    fry69: 18
+  start_tag: v0.59.0
+  total_lines: 272
+- pyclaw_percentage: 65.31
+  pyclaw_total: 804
+  end_date: '2024-11-01'
+  end_tag: v0.61.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/analytics.py:
+      Paul Gauthier: 75
+      Paul Gauthier (pyclaw): 89
+    pyclaw/args.py:
+      Paul Gauthier: 6
+      Paul Gauthier (pyclaw): 28
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 56
+      Paul Gauthier (pyclaw): 43
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 14
+    pyclaw/commands.py:
+      Paul Gauthier: 14
+      Paul Gauthier (pyclaw): 86
+    pyclaw/io.py:
+      Paul Gauthier: 12
+      Paul Gauthier (pyclaw): 32
+    pyclaw/linter.py:
+      Paul Gauthier: 6
+    pyclaw/main.py:
+      Paul Gauthier: 48
+      Paul Gauthier (pyclaw): 10
+    pyclaw/models.py:
+      Paul Gauthier: 40
+      Paul Gauthier (pyclaw): 63
+      kAIto47802: 4
+    pyclaw/repomap.py:
+      Paul Gauthier: 12
+      Paul Gauthier (pyclaw): 52
+    pyclaw/sendchat.py:
+      Paul Gauthier: 23
+      Paul Gauthier (pyclaw): 23
+    pyclaw/urls.py:
+      Paul Gauthier: 2
+    pyclaw/utils.py:
+      Paul Gauthier (pyclaw): 6
+    scripts/issues.py:
+      Paul Gauthier (pyclaw): 13
+    scripts/pip-compile.sh:
+      Paul Gauthier (pyclaw): 13
+    scripts/update-docs.sh:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 5
+    tests/basic/test_analytics.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 99
+    tests/basic/test_commands.py:
+      Konstantin L: 16
+      Paul Gauthier: 91
+      Paul Gauthier (pyclaw): 212
+    tests/basic/test_io.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 4
+    tests/basic/test_main.py:
+      Paul Gauthier (pyclaw): 3
+    tests/basic/test_models.py:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 9
+    tests/basic/test_sanity_check_repo.py:
+      Paul Gauthier (pyclaw): 6
+    tests/basic/test_sendchat.py:
+      Paul Gauthier (pyclaw): 8
+  grand_total:
+    Konstantin L: 16
+    Paul Gauthier: 407
+    Paul Gauthier (pyclaw): 804
+    kAIto47802: 4
+  start_tag: v0.60.0
+  total_lines: 1231
+- pyclaw_percentage: 80.49
+  pyclaw_total: 66
+  end_date: '2024-11-04'
+  end_tag: v0.62.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier (pyclaw): 14
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 6
+    pyclaw/main.py:
+      Paul Gauthier (pyclaw): 4
+    pyclaw/models.py:
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 36
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 12
+  grand_total:
+    Paul Gauthier: 16
+    Paul Gauthier (pyclaw): 66
+  start_tag: v0.61.0
+  total_lines: 82
+- pyclaw_percentage: 54.99
+  pyclaw_total: 369
+  end_date: '2024-11-13'
+  end_tag: v0.63.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/architect_coder.py:
+      Paul Gauthier: 3
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 42
+      Paul Gauthier (pyclaw): 1
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 4
+    pyclaw/commands.py:
+      Paul Gauthier: 13
+    pyclaw/exceptions.py:
+      Paul Gauthier: 72
+      Paul Gauthier (pyclaw): 4
+    pyclaw/io.py:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 23
+    pyclaw/main.py:
+      Paul Gauthier: 9
+      Paul Gauthier (pyclaw): 9
+    pyclaw/models.py:
+      Logan Attwood: 17
+      Paul Gauthier: 50
+      Paul Gauthier (pyclaw): 7
+    pyclaw/repo.py:
+      Paul Gauthier: 7
+    pyclaw/repomap.py:
+      Paul Gauthier: 4
+    pyclaw/sendchat.py:
+      Paul Gauthier: 17
+      Paul Gauthier (pyclaw): 4
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 1
+    scripts/issues.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 183
+    tests/basic/test_coder.py:
+      Paul Gauthier: 2
+    tests/basic/test_commands.py:
+      Paul Gauthier (pyclaw): 16
+    tests/basic/test_editblock.py:
+      Paul Gauthier: 41
+    tests/basic/test_exceptions.py:
+      Paul Gauthier (pyclaw): 65
+    tests/basic/test_main.py:
+      Paul Gauthier: 1
+    tests/basic/test_sanity_check_repo.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 2
+    tests/basic/test_sendchat.py:
+      Paul Gauthier: 8
+      Paul Gauthier (pyclaw): 55
+    tests/scrape/test_scrape.py:
+      Paul Gauthier: 1
+  grand_total:
+    Logan Attwood: 17
+    Paul Gauthier: 285
+    Paul Gauthier (pyclaw): 369
+  start_tag: v0.62.0
+  total_lines: 671
+- pyclaw_percentage: 72.99
+  pyclaw_total: 873
+  end_date: '2024-11-21'
+  end_tag: v0.64.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/analytics.py:
+      Paul Gauthier: 20
+      Paul Gauthier (pyclaw): 21
+    pyclaw/args.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 10
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 15
+      Paul Gauthier (pyclaw): 3
+      caetanominuzzo: 1
+    pyclaw/commands.py:
+      Chad Phillips: 4
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 19
+    pyclaw/editor.py:
+      Chad Phillips: 133
+      Paul Gauthier (pyclaw): 13
+    pyclaw/exceptions.py:
+      Paul Gauthier: 5
+    pyclaw/help_pats.py:
+      Paul Gauthier: 1
+    pyclaw/io.py:
+      Chad Phillips: 9
+      Paul Gauthier (pyclaw): 41
+      mw: 21
+    pyclaw/main.py:
+      Paul Gauthier: 21
+      Paul Gauthier (pyclaw): 37
+    pyclaw/models.py:
+      Paul Gauthier: 41
+      Paul Gauthier (pyclaw): 33
+    pyclaw/repo.py:
+      Paul Gauthier (pyclaw): 5
+    pyclaw/urls.py:
+      Paul Gauthier: 1
+    pyclaw/website/_includes/edit-leaderboard.js:
+      Paul Gauthier (pyclaw): 97
+    pyclaw/website/_includes/quant-chart.js:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 66
+    pyclaw/website/_includes/refactor-leaderboard.js:
+      Paul Gauthier (pyclaw): 90
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 10
+    pyclaw/website/share/index.md:
+      Paul Gauthier (pyclaw): 29
+    benchmark/over_time.py:
+      Paul Gauthier: 11
+      Paul Gauthier (pyclaw): 159
+    scripts/blame.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 2
+    scripts/issues.py:
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 12
+    scripts/versionbump.py:
+      Paul Gauthier: 7
+    tests/basic/test_analytics.py:
+      Paul Gauthier: 12
+      Paul Gauthier (pyclaw): 30
+    tests/basic/test_commands.py:
+      Paul Gauthier (pyclaw): 4
+    tests/basic/test_editor.py:
+      Paul Gauthier (pyclaw): 129
+    tests/basic/test_main.py:
+      Paul Gauthier (pyclaw): 8
+    tests/basic/test_models.py:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 55
+  grand_total:
+    Chad Phillips: 146
+    Paul Gauthier: 155
+    Paul Gauthier (pyclaw): 873
+    caetanominuzzo: 1
+    mw: 21
+  start_tag: v0.63.0
+  total_lines: 1196
+- pyclaw_percentage: 81.11
+  pyclaw_total: 584
+  end_date: '2024-11-26'
+  end_tag: v0.65.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/analytics.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 5
+    pyclaw/args.py:
+      Paul Gauthier (pyclaw): 12
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 31
+    pyclaw/commands.py:
+      Paul Gauthier: 2
+    pyclaw/io.py:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 9
+    pyclaw/main.py:
+      Paul Gauthier: 15
+      Paul Gauthier (pyclaw): 19
+    pyclaw/models.py:
+      Paul Gauthier: 9
+      Paul Gauthier (pyclaw): 17
+    pyclaw/queries/tree-sitter-dart-tags.scm:
+      malkoG: 91
+    pyclaw/urls.py:
+      Paul Gauthier (pyclaw): 1
+    pyclaw/website/_includes/quant-chart.js:
+      Paul Gauthier (pyclaw): 76
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 1
+    benchmark/benchmark.py:
+      Paul Gauthier (pyclaw): 10
+    benchmark/docker.sh:
+      Paul Gauthier (pyclaw): 1
+    benchmark/over_time.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 157
+    scripts/update-docs.sh:
+      Paul Gauthier: 1
+    scripts/update-history.py:
+      Paul Gauthier: 8
+      Paul Gauthier (pyclaw): 64
+    tests/basic/test_coder.py:
+      Paul Gauthier (pyclaw): 81
+    tests/basic/test_editor.py:
+      Paul Gauthier (pyclaw): 16
+    tests/basic/test_main.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 42
+    tests/basic/test_models.py:
+      Paul Gauthier (pyclaw): 30
+    tests/basic/test_repomap.py:
+      Paul Gauthier (pyclaw): 13
+  grand_total:
+    Paul Gauthier: 45
+    Paul Gauthier (pyclaw): 584
+    malkoG: 91
+  start_tag: v0.64.0
+  total_lines: 720
+- pyclaw_percentage: 86.35
+  pyclaw_total: 854
+  end_date: '2024-12-01'
+  end_tag: v0.66.0
+  file_counts:
+    .github/workflows/docker-build-test.yml:
+      Paul Gauthier (pyclaw): 2
+    .github/workflows/docker-release.yml:
+      Paul Gauthier (pyclaw): 2
+    .github/workflows/pages.yml:
+      Paul Gauthier (pyclaw): 3
+    .github/workflows/release.yml:
+      Paul Gauthier (pyclaw): 2
+    .github/workflows/ubuntu-tests.yml:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 8
+    .github/workflows/windows-tests.yml:
+      Paul Gauthier (pyclaw): 4
+    pyclaw/__init__.py:
+      Paul Gauthier: 16
+    pyclaw/analytics.py:
+      Paul Gauthier (pyclaw): 19
+    pyclaw/args.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 6
+      Philippe de Reynal: 6
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 15
+      Paul Gauthier (pyclaw): 41
+    pyclaw/commands.py:
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 27
+    pyclaw/io.py:
+      Paul Gauthier (pyclaw): 17
+    pyclaw/linter.py:
+      Paul Gauthier (pyclaw): 2
+    pyclaw/main.py:
+      Paul Gauthier: 17
+      Paul Gauthier (pyclaw): 46
+    pyclaw/models.py:
+      Paul Gauthier: 7
+    pyclaw/run_cmd.py:
+      Paul Gauthier (pyclaw): 8
+    pyclaw/utils.py:
+      Paul Gauthier: 1
+    pyclaw/voice.py:
+      Philippe de Reynal: 24
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 1
+    benchmark/benchmark.py:
+      Paul Gauthier (pyclaw): 38
+    scripts/blame.py:
+      Paul Gauthier (pyclaw): 26
+    scripts/issues.py:
+      Paul Gauthier: 3
+    scripts/update-history.py:
+      Paul Gauthier (pyclaw): 59
+    tests/basic/test_coder.py:
+      Paul Gauthier: 4
+    tests/basic/test_commands.py:
+      Paul Gauthier: 12
+      Paul Gauthier (pyclaw): 72
+    tests/basic/test_main.py:
+      Paul Gauthier (pyclaw): 4
+    tests/basic/test_models.py:
+      Paul Gauthier: 2
+    tests/basic/test_repomap.py:
+      Paul Gauthier: 12
+      Paul Gauthier (pyclaw): 45
+    tests/basic/test_voice.py:
+      Paul Gauthier (pyclaw): 103
+    tests/browser/test_browser.py:
+      Paul Gauthier: 1
+    tests/fixtures/languages/c/test.c:
+      Paul Gauthier (pyclaw): 6
+    tests/fixtures/languages/cpp/test.cpp:
+      Paul Gauthier (pyclaw): 6
+    tests/fixtures/languages/csharp/test.cs:
+      Paul Gauthier (pyclaw): 39
+    tests/fixtures/languages/elisp/test.el:
+      Paul Gauthier (pyclaw): 25
+    tests/fixtures/languages/elixir/test.ex:
+      Paul Gauthier (pyclaw): 5
+    tests/fixtures/languages/elm/test.elm:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 37
+    tests/fixtures/languages/go/test.go:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 41
+    tests/fixtures/languages/java/test.java:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 14
+    tests/fixtures/languages/javascript/test.js:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 25
+    tests/fixtures/languages/ocaml/test.ml:
+      Paul Gauthier (pyclaw): 19
+    tests/fixtures/languages/php/test.php:
+      Paul Gauthier (pyclaw): 5
+    tests/fixtures/languages/python/test.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 26
+    tests/fixtures/languages/ql/test.ql:
+      Paul Gauthier (pyclaw): 3
+    tests/fixtures/languages/ruby/test.rb:
+      Paul Gauthier (pyclaw): 3
+    tests/fixtures/languages/rust/test.rs:
+      Paul Gauthier (pyclaw): 33
+    tests/fixtures/languages/tsx/test.tsx:
+      Paul Gauthier (pyclaw): 30
+    tests/fixtures/languages/typescript/test.ts:
+      Paul Gauthier (pyclaw): 3
+  grand_total:
+    Paul Gauthier: 105
+    Paul Gauthier (pyclaw): 854
+    Philippe de Reynal: 30
+  start_tag: v0.65.0
+  total_lines: 989
+- pyclaw_percentage: 64.41
+  pyclaw_total: 429
+  end_date: '2024-12-06'
+  end_tag: v0.67.0
+  file_counts:
+    .github/workflows/issues.yml:
+      Paul Gauthier (pyclaw): 29
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/analytics.py:
+      Paul Gauthier: 13
+      Paul Gauthier (pyclaw): 7
+    pyclaw/args.py:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 5
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 15
+    pyclaw/commands.py:
+      Paul Gauthier: 11
+    pyclaw/io.py:
+      Paul Gauthier: 28
+      Paul Gauthier (pyclaw): 32
+    pyclaw/llm.py:
+      Paul Gauthier: 5
+    pyclaw/main.py:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 5
+    pyclaw/models.py:
+      Paul Gauthier: 1
+    pyclaw/run_cmd.py:
+      Paul Gauthier: 1
+    pyclaw/utils.py:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 22
+    pyclaw/watch.py:
+      Paul Gauthier: 52
+      Paul Gauthier (pyclaw): 211
+    pyclaw/website/_includes/qwq-chart.js:
+      Paul Gauthier: 55
+      Paul Gauthier (pyclaw): 47
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 1
+    scripts/blame.py:
+      Paul Gauthier (pyclaw): 26
+    scripts/update-history.py:
+      Paul Gauthier: 5
+    scripts/versionbump.py:
+      Paul Gauthier: 2
+    tests/basic/test_analytics.py:
+      Paul Gauthier: 9
+      Paul Gauthier (pyclaw): 3
+    tests/basic/test_main.py:
+      Paul Gauthier: 1
+    tests/basic/test_models.py:
+      Paul Gauthier: 8
+      Paul Gauthier (pyclaw): 7
+    tests/basic/test_watch.py:
+      Paul Gauthier: 10
+      Paul Gauthier (pyclaw): 34
+    tests/browser/test_browser.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 1
+  grand_total:
+    Paul Gauthier: 237
+    Paul Gauthier (pyclaw): 429
+  start_tag: v0.66.0
+  total_lines: 666
+- pyclaw_percentage: 65.11
+  pyclaw_total: 418
+  end_date: '2024-12-10'
+  end_tag: v0.68.0
+  file_counts:
+    .github/workflows/pages.yml:
+      Paul Gauthier (pyclaw): 1
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/analytics.py:
+      Paul Gauthier: 2
+    pyclaw/args.py:
+      Paul Gauthier: 62
+      Paul Gauthier (pyclaw): 7
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 12
+      Paul Gauthier (pyclaw): 12
+    pyclaw/coders/editor_editblock_coder.py:
+      Paul Gauthier: 1
+    pyclaw/coders/editor_whole_coder.py:
+      Paul Gauthier: 1
+    pyclaw/commands.py:
+      Paul Gauthier: 28
+      Paul Gauthier (pyclaw): 21
+    pyclaw/copypaste.py:
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 60
+    pyclaw/exceptions.py:
+      Paul Gauthier: 9
+    pyclaw/history.py:
+      Paul Gauthier (pyclaw): 1
+    pyclaw/io.py:
+      Paul Gauthier: 13
+    pyclaw/main.py:
+      Paul Gauthier: 34
+      Paul Gauthier (pyclaw): 26
+    pyclaw/models.py:
+      Paul Gauthier: 15
+    pyclaw/repo.py:
+      Paul Gauthier (pyclaw): 1
+    pyclaw/run_cmd.py:
+      Paul Gauthier: 1
+    pyclaw/sendchat.py:
+      Paul Gauthier (pyclaw): 4
+    pyclaw/utils.py:
+      Paul Gauthier: 1
+    pyclaw/voice.py:
+      Paul Gauthier: 9
+    pyclaw/watch.py:
+      Paul Gauthier: 6
+      Paul Gauthier (pyclaw): 35
+    pyclaw/website/_includes/edit-leaderboard.js:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 90
+    pyclaw/website/_includes/head_custom.html:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 53
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 2
+    scripts/blame.py:
+      Paul Gauthier: 6
+      Paul Gauthier (pyclaw): 17
+    scripts/pip-compile.sh:
+      Paul Gauthier: 2
+    tests/basic/test_commands.py:
+      Paul Gauthier (pyclaw): 28
+    tests/basic/test_history.py:
+      Paul Gauthier (pyclaw): 3
+    tests/basic/test_main.py:
+      Paul Gauthier (pyclaw): 53
+    tests/basic/test_repo.py:
+      Paul Gauthier (pyclaw): 3
+    tests/basic/test_sendchat.py:
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 1
+    tests/basic/test_watch.py:
+      Paul Gauthier: 1
+  grand_total:
+    Paul Gauthier: 224
+    Paul Gauthier (pyclaw): 418
+  start_tag: v0.67.0
+  total_lines: 642
+- pyclaw_percentage: 68.65
+  pyclaw_total: 219
+  end_date: '2024-12-13'
+  end_tag: v0.69.0
+  file_counts:
+    .github/workflows/pages.yml:
+      Paul Gauthier: 2
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/analytics.py:
+      Paul Gauthier: 2
+    pyclaw/args.py:
+      Mir Adnan ALI: 5
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      JeongJuhyeon: 1
+      Mir Adnan ALI: 3
+    pyclaw/commands.py:
+      Mir Adnan ALI: 4
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 3
+    pyclaw/io.py:
+      Mir Adnan ALI: 37
+      Paul Gauthier: 8
+      Paul Gauthier (pyclaw): 3
+    pyclaw/main.py:
+      Mir Adnan ALI: 1
+    pyclaw/models.py:
+      Paul Gauthier: 7
+    pyclaw/watch.py:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 47
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 1
+    benchmark/benchmark.py:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 7
+    scripts/blame.py:
+      Paul Gauthier (pyclaw): 1
+    scripts/issues.py:
+      Paul Gauthier (pyclaw): 70
+    scripts/update-history.py:
+      Paul Gauthier: 3
+    tests/basic/test_io.py:
+      Paul Gauthier (pyclaw): 20
+    tests/basic/test_watch.py:
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 68
+  grand_total:
+    JeongJuhyeon: 1
+    Mir Adnan ALI: 50
+    Paul Gauthier: 49
+    Paul Gauthier (pyclaw): 219
+  start_tag: v0.68.0
+  total_lines: 319
+- pyclaw_percentage: 73.19
+  pyclaw_total: 871
+  end_date: '2024-12-26'
+  end_tag: v0.70.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/analytics.py:
+      Paul Gauthier: 6
+      Paul Gauthier (pyclaw): 42
+    pyclaw/args.py:
+      Evan Johnson: 2
+    pyclaw/coders/search_replace.py:
+      Paul Gauthier: 5
+    pyclaw/commands.py:
+      Paul Gauthier (pyclaw): 36
+    pyclaw/help_pats.py:
+      Paul Gauthier: 3
+    pyclaw/io.py:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 9
+    pyclaw/main.py:
+      Paul Gauthier: 15
+      Paul Gauthier (pyclaw): 5
+      apaz-cli: 3
+      mdk: 6
+    pyclaw/models.py:
+      Paul Gauthier: 38
+    pyclaw/repo.py:
+      Paul Gauthier: 14
+    pyclaw/utils.py:
+      Paul Gauthier: 2
+    pyclaw/watch.py:
+      Paul Gauthier: 13
+    pyclaw/website/_includes/head_custom.html:
+      Paul Gauthier (pyclaw): 4
+    pyclaw/website/_includes/leaderboard.js:
+      Paul Gauthier (pyclaw): 14
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 28
+      Paul Gauthier (pyclaw): 2
+    benchmark/Dockerfile:
+      Paul Gauthier: 8
+      Paul Gauthier (pyclaw): 43
+    benchmark/benchmark.py:
+      Paul Gauthier: 70
+      Paul Gauthier (pyclaw): 152
+    benchmark/clone-exercism.sh:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 18
+    benchmark/cpp-test.sh:
+      Paul Gauthier: 10
+      Paul Gauthier (pyclaw): 1
+    benchmark/docker.sh:
+      Paul Gauthier (pyclaw): 4
+    benchmark/install-docker-ubuntu.sh:
+      Paul Gauthier (pyclaw): 63
+    benchmark/npm-test.sh:
+      Paul Gauthier: 10
+      Paul Gauthier (pyclaw): 3
+    benchmark/problem_stats.py:
+      Paul Gauthier: 34
+      Paul Gauthier (pyclaw): 319
+    benchmark/rsync.sh:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 26
+    scripts/blame.py:
+      Paul Gauthier (pyclaw): 6
+    scripts/my_models.py:
+      Paul Gauthier (pyclaw): 95
+    scripts/update-blame.sh:
+      Paul Gauthier (pyclaw): 3
+    scripts/update-docs.sh:
+      Paul Gauthier: 1
+    tests/basic/test_analytics.py:
+      Paul Gauthier (pyclaw): 19
+    tests/basic/test_main.py:
+      Paul Gauthier (pyclaw): 7
+    tests/basic/test_sanity_check_repo.py:
+      mdk: 34
+  grand_total:
+    Evan Johnson: 2
+    Paul Gauthier: 274
+    Paul Gauthier (pyclaw): 871
+    apaz-cli: 3
+    mdk: 40
+  start_tag: v0.69.0
+  total_lines: 1190
+- pyclaw_percentage: 60.61
+  pyclaw_total: 237
+  end_date: '2025-01-10'
+  end_tag: v0.71.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 2
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 13
+    pyclaw/commands.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 22
+    pyclaw/io.py:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 16
+    pyclaw/linter.py:
+      Aaron Weisberg: 6
+    pyclaw/main.py:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 13
+      apaz-cli: 18
+    pyclaw/mdstream.py:
+      Paul Gauthier: 38
+      Paul Gauthier (pyclaw): 58
+    pyclaw/models.py:
+      Paul Gauthier: 11
+      Paul Gauthier (pyclaw): 2
+    pyclaw/repo.py:
+      Krazer: 10
+      Paul Gauthier: 5
+    pyclaw/run_cmd.py:
+      Aaron Weisberg: 2
+    pyclaw/utils.py:
+      Paul Gauthier: 9
+    pyclaw/voice.py:
+      Paul Gauthier: 11
+      Paul Gauthier (pyclaw): 13
+    pyclaw/watch.py:
+      Paul Gauthier: 1
+    benchmark/Dockerfile:
+      Josh Vera: 1
+      Paul Maunders: 12
+    benchmark/benchmark.py:
+      Nimesh Ghelani: 1
+      Paul Gauthier: 6
+      Paul Gauthier (pyclaw): 30
+    benchmark/problem_stats.py:
+      Paul Gauthier (pyclaw): 5
+    docker/Dockerfile:
+      Paul Gauthier (pyclaw): 32
+    scripts/update-history.py:
+      Paul Gauthier (pyclaw): 1
+    tests/basic/test_io.py:
+      Paul Gauthier (pyclaw): 7
+    tests/basic/test_linter.py:
+      Aaron Weisberg: 2
+    tests/basic/test_models.py:
+      Paul Gauthier (pyclaw): 25
+  grand_total:
+    Aaron Weisberg: 10
+    Josh Vera: 1
+    Krazer: 10
+    Nimesh Ghelani: 1
+    Paul Gauthier: 102
+    Paul Gauthier (pyclaw): 237
+    Paul Maunders: 12
+    apaz-cli: 18
+  start_tag: v0.70.0
+  total_lines: 391
+- pyclaw_percentage: 48.35
+  pyclaw_total: 161
+  end_date: '2025-01-20'
+  end_tag: v0.72.0
+  file_counts:
+    .github/workflows/docker-build-test.yml:
+      Paul Gauthier (pyclaw): 58
+    .github/workflows/pages.yml:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 1
+    .github/workflows/ubuntu-tests.yml:
+      Paul Gauthier (pyclaw): 8
+    .github/workflows/windows-tests.yml:
+      Paul Gauthier (pyclaw): 8
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Titusz Pan: 6
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 11
+      Paul Gauthier (pyclaw): 2
+    pyclaw/coders/single_wholefile_func_coder.py:
+      Paul Gauthier: 1
+    pyclaw/coders/wholefile_func_coder.py:
+      Paul Gauthier: 1
+    pyclaw/commands.py:
+      Paul Gauthier: 3
+    pyclaw/history.py:
+      Paul Gauthier: 7
+    pyclaw/io.py:
+      Paul Gauthier (pyclaw): 14
+      Titusz Pan: 6
+    pyclaw/main.py:
+      Titusz Pan: 1
+    pyclaw/models.py:
+      Paul Gauthier: 39
+    pyclaw/queries/tree-sitter-kotlin-tags.scm:
+      Paul Walker: 27
+    pyclaw/repomap.py:
+      Paul Gauthier (pyclaw): 2
+    pyclaw/sendchat.py:
+      Paul Gauthier: 9
+      Paul Gauthier (pyclaw): 22
+    pyclaw/utils.py:
+      Paul Gauthier: 1
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 2
+    benchmark/benchmark.py:
+      Paul Gauthier: 9
+    benchmark/rsync.sh:
+      Paul Gauthier: 21
+    docker/Dockerfile:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 6
+    scripts/my_models.py:
+      Paul Gauthier: 3
+    scripts/update-docs.sh:
+      Paul Gauthier: 2
+    tests/basic/test_io.py:
+      Paul Gauthier (pyclaw): 40
+    tests/basic/test_repomap.py:
+      Paul Walker: 1
+    tests/fixtures/languages/kotlin/test.kt:
+      Paul Walker: 16
+  grand_total:
+    Paul Gauthier: 115
+    Paul Gauthier (pyclaw): 161
+    Paul Walker: 44
+    Titusz Pan: 13
+  start_tag: v0.71.0
+  total_lines: 333
+- pyclaw_percentage: 33.7
+  pyclaw_total: 307
+  end_date: '2025-01-31'
+  end_tag: v0.73.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 5
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 38
+      Paul Gauthier (pyclaw): 29
+    pyclaw/commands.py:
+      xqyz: 1
+    pyclaw/io.py:
+      Paul Gauthier: 7
+    pyclaw/main.py:
+      Paul Gauthier: 13
+      Paul Gauthier (pyclaw): 15
+    pyclaw/models.py:
+      Paul Gauthier: 8
+      Paul Gauthier (pyclaw): 34
+    pyclaw/resources/model-settings.yml:
+      Paul Gauthier: 442
+      kennyfrc: 17
+      xqyz: 12
+    pyclaw/sendchat.py:
+      Mir Adnan ALI: 26
+      Paul Gauthier: 13
+      Paul Gauthier (pyclaw): 6
+    pyclaw/urls.py:
+      Paul Gauthier: 1
+    pyclaw/website/_includes/leaderboard.js:
+      Paul Gauthier (pyclaw): 1
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 2
+    benchmark/benchmark.py:
+      Paul Gauthier (pyclaw): 21
+    benchmark/rsync.sh:
+      Paul Gauthier: 2
+    tests/basic/test_coder.py:
+      Paul Gauthier: 15
+      Paul Gauthier (pyclaw): 53
+    tests/basic/test_main.py:
+      Paul Gauthier (pyclaw): 69
+    tests/basic/test_sendchat.py:
+      Paul Gauthier (pyclaw): 77
+  grand_total:
+    Mir Adnan ALI: 26
+    Paul Gauthier: 548
+    Paul Gauthier (pyclaw): 307
+    kennyfrc: 17
+    xqyz: 13
+  start_tag: v0.72.0
+  total_lines: 911
+- pyclaw_percentage: 72.82
+  pyclaw_total: 635
+  end_date: '2025-02-06'
+  end_tag: v0.74.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 24
+      Paul Gauthier (pyclaw): 9
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 5
+    pyclaw/coders/wholefile_coder.py:
+      Paul Gauthier: 2
+    pyclaw/commands.py:
+      Paul Gauthier: 1
+    pyclaw/exceptions.py:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 7
+    pyclaw/history.py:
+      Paul Gauthier (pyclaw): 1
+    pyclaw/io.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 20
+    pyclaw/llm.py:
+      Paul Gauthier: 3
+    pyclaw/main.py:
+      Paul Gauthier: 21
+      Paul Gauthier (pyclaw): 25
+    pyclaw/models.py:
+      Paul Gauthier: 104
+      Paul Gauthier (pyclaw): 77
+    pyclaw/repo.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 2
+      "Viktor Sz\xE9pe": 3
+    pyclaw/resources/model-settings.yml:
+      Paul Gauthier: 24
+    pyclaw/watch.py:
+      Paul Gauthier (pyclaw): 45
+    benchmark/docker.sh:
+      Paul Gauthier: 2
+    docker/Dockerfile:
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 4
+    tests/basic/test_editblock.py:
+      Paul Gauthier: 21
+    tests/basic/test_history.py:
+      Paul Gauthier (pyclaw): 13
+    tests/basic/test_io.py:
+      Paul Gauthier (pyclaw): 68
+    tests/basic/test_main.py:
+      Paul Gauthier: 8
+      Paul Gauthier (pyclaw): 1
+    tests/basic/test_models.py:
+      Paul Gauthier (pyclaw): 298
+    tests/basic/test_repo.py:
+      Paul Gauthier (pyclaw): 11
+    tests/basic/test_sendchat.py:
+      Paul Gauthier (pyclaw): 7
+    tests/basic/test_watch.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 47
+  grand_total:
+    Paul Gauthier: 234
+    Paul Gauthier (pyclaw): 635
+    "Viktor Sz\xE9pe": 3
+  start_tag: v0.73.0
+  total_lines: 872
+- pyclaw_percentage: 43.8
+  pyclaw_total: 166
+  end_date: '2025-02-24'
+  end_tag: v0.75.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 7
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 12
+      Paul Gauthier (pyclaw): 4
+    pyclaw/commands.py:
+      FeepingCreature (pyclaw): 6
+    pyclaw/editor.py:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 5
+    pyclaw/io.py:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 4
+    pyclaw/linter.py:
+      Paul Gauthier: 1
+    pyclaw/main.py:
+      Paul Gauthier: 20
+    pyclaw/models.py:
+      Paul Gauthier: 4
+    pyclaw/queries/tree-sitter-language-pack/javascript-tags.scm:
+      Paul Gauthier: 5
+    pyclaw/queries/tree-sitter-languages/hcl-tags.scm:
+      Paul Gauthier: 3
+      Warren Krewenki: 74
+    pyclaw/queries/tree-sitter-languages/javascript-tags.scm:
+      Paul Gauthier: 5
+    pyclaw/repomap.py:
+      Paul Gauthier: 43
+      Paul Gauthier (pyclaw): 11
+    pyclaw/resources/model-settings.yml:
+      Paul Gauthier: 20
+    pyclaw/special.py:
+      Lucas Shadler: 1
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 1
+    benchmark/Dockerfile:
+      Paul Gauthier (pyclaw): 1
+    benchmark/benchmark.py:
+      Paul Gauthier: 4
+    benchmark/cpp-test.sh:
+      Paul Gauthier: 1
+    scripts/blame.py:
+      Paul Gauthier (pyclaw): 2
+    scripts/issues.py:
+      Paul Gauthier (pyclaw): 19
+    tests/basic/test_coder.py:
+      Paul Gauthier (pyclaw): 19
+    tests/basic/test_editor.py:
+      Antti Kaihola: 1
+      Paul Gauthier (pyclaw): 41
+    tests/basic/test_models.py:
+      Paul Gauthier (pyclaw): 1
+    tests/basic/test_repomap.py:
+      Paul Gauthier (pyclaw): 1
+    tests/fixtures/languages/hcl/test.tf:
+      Paul Gauthier (pyclaw): 52
+  grand_total:
+    Antti Kaihola: 1
+    FeepingCreature (pyclaw): 6
+    Lucas Shadler: 1
+    Paul Gauthier: 137
+    Paul Gauthier (pyclaw): 160
+    Warren Krewenki: 74
+  start_tag: v0.74.0
+  total_lines: 379
+- pyclaw_percentage: 82.52
+  pyclaw_total: 1667
+  end_date: '2025-03-10'
+  end_tag: v0.76.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 25
+    pyclaw/args_formatter.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 3
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 57
+      Paul Gauthier (pyclaw): 30
+    pyclaw/deprecated.py:
+      Paul Gauthier (pyclaw): 125
+    pyclaw/io.py:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 130
+    pyclaw/main.py:
+      Akira Komamura: 2
+      Mattias: 1
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 16
+    pyclaw/models.py:
+      Paul Gauthier: 11
+      Paul Gauthier (pyclaw): 72
+    pyclaw/queries/tree-sitter-language-pack/csharp-tags.scm:
+      Paul Gauthier: 14
+      Paul Gauthier (pyclaw): 12
+    pyclaw/reasoning_tags.py:
+      Paul Gauthier: 14
+      Paul Gauthier (pyclaw): 68
+    pyclaw/repo.py:
+      Akira Komamura: 1
+      Paul Gauthier (pyclaw): 5
+    pyclaw/repomap.py:
+      Paul Gauthier: 9
+    pyclaw/resources/model-settings.yml:
+      Paul Gauthier: 105
+      Paul Gauthier (pyclaw): 51
+      gmoz22: 12
+    pyclaw/website/_includes/leaderboard.js:
+      Paul Gauthier (pyclaw): 48
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 2
+    benchmark/benchmark.py:
+      Paul Gauthier: 1
+    benchmark/problem_stats.py:
+      Paul Gauthier (pyclaw): 2
+    docker/Dockerfile:
+      Paul Gauthier: 1
+    scripts/blame.py:
+      Paul Gauthier: 1
+    scripts/pip-compile.sh:
+      Claudia Pellegrino: 12
+      Paul Gauthier: 6
+      Paul Gauthier (pyclaw): 11
+    scripts/update-history.py:
+      Paul Gauthier: 1
+    scripts/versionbump.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 64
+    tests/basic/test_deprecated.py:
+      Paul Gauthier: 10
+      Paul Gauthier (pyclaw): 125
+    tests/basic/test_io.py:
+      Paul Gauthier (pyclaw): 54
+    tests/basic/test_main.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 97
+    tests/basic/test_model_info_manager.py:
+      Paul Gauthier (pyclaw): 80
+    tests/basic/test_models.py:
+      Paul Gauthier: 31
+      Paul Gauthier (pyclaw): 38
+    tests/basic/test_reasoning.py:
+      Paul Gauthier: 33
+      Paul Gauthier (pyclaw): 534
+    tests/basic/test_repomap.py:
+      Paul Gauthier: 2
+    tests/basic/test_ssl_verification.py:
+      Paul Gauthier (pyclaw): 77
+  grand_total:
+    Akira Komamura: 3
+    Claudia Pellegrino: 12
+    Mattias: 1
+    Paul Gauthier: 325
+    Paul Gauthier (pyclaw): 1667
+    gmoz22: 12
+  start_tag: v0.75.0
+  total_lines: 2020
+- pyclaw_percentage: 68.94
+  pyclaw_total: 1447
+  end_date: '2025-03-13'
+  end_tag: v0.77.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier (pyclaw): 7
+    pyclaw/coders/architect_coder.py:
+      Paul Gauthier (pyclaw): 2
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier (pyclaw): 14
+    pyclaw/commands.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 73
+    pyclaw/deprecated.py:
+      Paul Gauthier: 2
+    pyclaw/io.py:
+      Paul Gauthier (pyclaw): 5
+    pyclaw/main.py:
+      Paul Gauthier (pyclaw): 12
+    pyclaw/models.py:
+      Paul Gauthier (pyclaw): 83
+    pyclaw/queries/tree-sitter-language-pack/arduino-tags.scm:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 2
+    pyclaw/queries/tree-sitter-language-pack/c-tags.scm:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 5
+    pyclaw/queries/tree-sitter-language-pack/chatito-tags.scm:
+      Paul Gauthier: 11
+      Paul Gauthier (pyclaw): 5
+    pyclaw/queries/tree-sitter-language-pack/commonlisp-tags.scm:
+      Paul Gauthier: 116
+      Paul Gauthier (pyclaw): 6
+    pyclaw/queries/tree-sitter-language-pack/cpp-tags.scm:
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 8
+    pyclaw/queries/tree-sitter-language-pack/d-tags.scm:
+      Paul Gauthier: 9
+      Paul Gauthier (pyclaw): 17
+    pyclaw/queries/tree-sitter-language-pack/dart-tags.scm:
+      Paul Gauthier: 65
+      Paul Gauthier (pyclaw): 19
+    pyclaw/queries/tree-sitter-language-pack/elisp-tags.scm:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 2
+    pyclaw/queries/tree-sitter-language-pack/elixir-tags.scm:
+      Paul Gauthier: 35
+      Paul Gauthier (pyclaw): 8
+    pyclaw/queries/tree-sitter-language-pack/elm-tags.scm:
+      Paul Gauthier: 8
+      Paul Gauthier (pyclaw): 6
+    pyclaw/queries/tree-sitter-language-pack/gleam-tags.scm:
+      Paul Gauthier: 26
+      Paul Gauthier (pyclaw): 15
+    pyclaw/queries/tree-sitter-language-pack/go-tags.scm:
+      Paul Gauthier: 28
+      Paul Gauthier (pyclaw): 10
+    pyclaw/queries/tree-sitter-language-pack/java-tags.scm:
+      Paul Gauthier: 13
+      Paul Gauthier (pyclaw): 7
+    pyclaw/queries/tree-sitter-language-pack/lua-tags.scm:
+      Paul Gauthier: 25
+      Paul Gauthier (pyclaw): 9
+    pyclaw/queries/tree-sitter-language-pack/pony-tags.scm:
+      Paul Gauthier: 20
+      Paul Gauthier (pyclaw): 19
+    pyclaw/queries/tree-sitter-language-pack/properties-tags.scm:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 2
+    pyclaw/queries/tree-sitter-language-pack/python-tags.scm:
+      Paul Gauthier: 9
+      Paul Gauthier (pyclaw): 5
+    pyclaw/queries/tree-sitter-language-pack/r-tags.scm:
+      Paul Gauthier: 17
+      Paul Gauthier (pyclaw): 4
+    pyclaw/queries/tree-sitter-language-pack/racket-tags.scm:
+      Paul Gauthier: 10
+      Paul Gauthier (pyclaw): 2
+    pyclaw/queries/tree-sitter-language-pack/ruby-tags.scm:
+      Paul Gauthier: 52
+      Paul Gauthier (pyclaw): 12
+    pyclaw/queries/tree-sitter-language-pack/rust-tags.scm:
+      Paul Gauthier: 46
+      Paul Gauthier (pyclaw): 14
+    pyclaw/queries/tree-sitter-language-pack/solidity-tags.scm:
+      Paul Gauthier: 30
+      Paul Gauthier (pyclaw): 13
+    pyclaw/queries/tree-sitter-language-pack/swift-tags.scm:
+      Paul Gauthier: 39
+      Paul Gauthier (pyclaw): 12
+    pyclaw/queries/tree-sitter-language-pack/udev-tags.scm:
+      Paul Gauthier: 15
+      Paul Gauthier (pyclaw): 5
+    pyclaw/resources/model-settings.yml:
+      Paul Gauthier: 12
+    pyclaw/watch.py:
+      Yutaka Matsubara: 4
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 8
+    scripts/redact-cast.py:
+      Paul Gauthier: 27
+      Paul Gauthier (pyclaw): 98
+    scripts/tsl_pack_langs.py:
+      Paul Gauthier (pyclaw): 145
+    scripts/versionbump.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 1
+    tests/basic/test_coder.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 109
+    tests/basic/test_commands.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 222
+    tests/basic/test_models.py:
+      Paul Gauthier (pyclaw): 45
+    tests/basic/test_repomap.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 132
+    tests/fixtures/languages/arduino/test.ino:
+      Paul Gauthier (pyclaw): 21
+    tests/fixtures/languages/c/test.c:
+      Paul Gauthier (pyclaw): 15
+    tests/fixtures/languages/chatito/test.chatito:
+      Paul Gauthier (pyclaw): 20
+    tests/fixtures/languages/commonlisp/test.lisp:
+      Paul Gauthier (pyclaw): 17
+    tests/fixtures/languages/d/test.d:
+      Paul Gauthier (pyclaw): 26
+    tests/fixtures/languages/dart/test.dart:
+      Paul Gauthier (pyclaw): 21
+    tests/fixtures/languages/elm/test.elm:
+      Paul Gauthier (pyclaw): 21
+    tests/fixtures/languages/gleam/test.gleam:
+      Paul Gauthier (pyclaw): 10
+    tests/fixtures/languages/lua/test.lua:
+      Paul Gauthier (pyclaw): 25
+    tests/fixtures/languages/pony/test.pony:
+      Paul Gauthier (pyclaw): 8
+    tests/fixtures/languages/properties/test.properties:
+      Paul Gauthier (pyclaw): 14
+    tests/fixtures/languages/r/test.r:
+      Paul Gauthier (pyclaw): 17
+    tests/fixtures/languages/racket/test.rkt:
+      Paul Gauthier (pyclaw): 8
+    tests/fixtures/languages/solidity/test.sol:
+      Paul Gauthier (pyclaw): 21
+    tests/fixtures/languages/swift/test.swift:
+      Paul Gauthier (pyclaw): 18
+    tests/fixtures/languages/udev/test.rules:
+      Paul Gauthier (pyclaw): 22
+  grand_total:
+    Paul Gauthier: 648
+    Paul Gauthier (pyclaw): 1447
+    Yutaka Matsubara: 4
+  start_tag: v0.76.0
+  total_lines: 2099
+- pyclaw_percentage: 91.82
+  pyclaw_total: 2682
+  end_date: '2025-03-21'
+  end_tag: v0.78.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier (pyclaw): 24
+      Yutaka Matsubara: 2
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 6
+    pyclaw/commands.py:
+      Carles Sala (pyclaw): 30
+      Paul Gauthier (pyclaw): 10
+    pyclaw/help_pats.py:
+      Paul Gauthier: 6
+    pyclaw/io.py:
+      Marco Mayer: 2
+      Paul Gauthier (pyclaw): 17
+    pyclaw/main.py:
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 29
+    pyclaw/mdstream.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 22
+    pyclaw/models.py:
+      Paul Gauthier (pyclaw): 41
+      lentil32 (pyclaw): 15
+    pyclaw/repo.py:
+      Paul Gauthier (pyclaw): 5
+    pyclaw/resources/model-settings.yml:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 22
+    pyclaw/website/_includes/head_custom.html:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 53
+    pyclaw/website/_includes/recording.js:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 424
+    pyclaw/website/assets/asciinema/asciinema-player.min.js:
+      Paul Gauthier: 1
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 1
+    pyclaw/website/index.html:
+      Paul Gauthier: 173
+      Paul Gauthier (pyclaw): 371
+    scripts/badges.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 496
+    scripts/blame.py:
+      Paul Gauthier: 2
+    scripts/jekyll_run.sh:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 5
+    scripts/logo_svg.py:
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 169
+    scripts/recording_audio.py:
+      Paul Gauthier (pyclaw): 338
+    scripts/redact-cast.py:
+      Paul Gauthier: 22
+      Paul Gauthier (pyclaw): 37
+    scripts/tmux_record.sh:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 17
+    scripts/update-docs.sh:
+      Paul Gauthier: 1
+    scripts/update-history.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 52
+    tests/basic/test_aws_credentials.py:
+      lentil32 (pyclaw): 169
+    tests/basic/test_commands.py:
+      Carles Sala (pyclaw): 40
+    tests/basic/test_main.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 193
+    tests/basic/test_repo.py:
+      Paul Gauthier (pyclaw): 48
+    tests/help/test_help.py:
+      Paul Gauthier (pyclaw): 49
+  grand_total:
+    Carles Sala (pyclaw): 70
+    Marco Mayer: 2
+    Paul Gauthier: 235
+    Paul Gauthier (pyclaw): 2428
+    Yutaka Matsubara: 2
+    lentil32 (pyclaw): 184
+  start_tag: v0.77.0
+  total_lines: 2921
+- pyclaw_percentage: 65.38
+  pyclaw_total: 221
+  end_date: '2025-03-25'
+  end_tag: v0.79.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/__init__.py:
+      Paul Gauthier: 2
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 15
+      Paul Gauthier (pyclaw): 5
+    pyclaw/coders/context_coder.py:
+      Paul Gauthier: 45
+      Paul Gauthier (pyclaw): 8
+    pyclaw/commands.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 20
+    pyclaw/io.py:
+      Paul Gauthier: 11
+      Paul Gauthier (pyclaw): 2
+    pyclaw/main.py:
+      Paul Gauthier (pyclaw): 4
+    pyclaw/models.py:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 1
+    pyclaw/repomap.py:
+      Paul Gauthier: 17
+    pyclaw/resources/model-settings.yml:
+      Paul Gauthier: 13
+      Paul Gauthier (pyclaw): 10
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 1
+    pyclaw/website/index.html:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 16
+    scripts/badges.py:
+      Paul Gauthier (pyclaw): 2
+    scripts/blame.py:
+      Paul Gauthier (pyclaw): 16
+    scripts/dl_icons.py:
+      Paul Gauthier (pyclaw): 60
+    scripts/tmux_record.sh:
+      Paul Gauthier: 1
+    tests/basic/test_coder.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 77
+  grand_total:
+    Paul Gauthier: 117
+    Paul Gauthier (pyclaw): 221
+  start_tag: v0.78.0
+  total_lines: 338
+- pyclaw_percentage: 86.86
+  pyclaw_total: 1837
+  end_date: '2025-03-31'
+  end_tag: v0.80.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 2
+    pyclaw/commands.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 20
+    pyclaw/exceptions.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 3
+    pyclaw/io.py:
+      Andrey Ivanov: 2
+      Matteo Landi (pyclaw): 11
+      Paul Gauthier (pyclaw): 38
+    pyclaw/linter.py:
+      Mir Adnan ALI: 2
+    pyclaw/main.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 21
+    pyclaw/mdstream.py:
+      Peter Schilling (pyclaw) (pyclaw): 25
+    pyclaw/models.py:
+      Paul Gauthier: 12
+      Paul Gauthier (pyclaw): 9
+    pyclaw/onboarding.py:
+      Paul Gauthier: 44
+      Paul Gauthier (pyclaw): 389
+    pyclaw/queries/tree-sitter-languages/scala-tags.scm:
+      Vasil Markoukin: 65
+    pyclaw/repo.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 7
+    pyclaw/repomap.py:
+      Paul Gauthier (pyclaw): 19
+    pyclaw/resources/model-settings.yml:
+      Paul Gauthier (pyclaw): 13
+    pyclaw/scrape.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 1
+    pyclaw/utils.py:
+      Paul Gauthier (pyclaw): 5
+    pyclaw/watch.py:
+      Matteo Landi (pyclaw): 2
+    pyclaw/website/_includes/leaderboard.js:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 2
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 1
+    pyclaw/website/index.html:
+      Paul Gauthier: 51
+      Paul Gauthier (pyclaw): 175
+    scripts/30k-image.py:
+      Paul Gauthier: 8
+      Paul Gauthier (pyclaw): 227
+    scripts/homepage.py:
+      Paul Gauthier (pyclaw): 122
+    tests/basic/test_commands.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 48
+    tests/basic/test_exceptions.py:
+      Paul Gauthier (pyclaw): 17
+    tests/basic/test_io.py:
+      Paul Gauthier (pyclaw): 28
+    tests/basic/test_main.py:
+      Paul Gauthier: 15
+      Paul Gauthier (pyclaw): 199
+    tests/basic/test_onboarding.py:
+      Paul Gauthier (pyclaw): 439
+    tests/basic/test_repomap.py:
+      Vasil Markoukin: 3
+    tests/basic/test_ssl_verification.py:
+      Paul Gauthier (pyclaw): 8
+    tests/basic/test_watch.py:
+      Matteo Landi (pyclaw): 9
+    tests/fixtures/languages/scala/test.scala:
+      Vasil Markoukin: 61
+  grand_total:
+    Andrey Ivanov: 2
+    Matteo Landi (pyclaw): 22
+    Mir Adnan ALI: 2
+    Paul Gauthier: 145
+    Paul Gauthier (pyclaw): 1790
+    Peter Schilling (pyclaw) (pyclaw): 25
+    Vasil Markoukin: 129
+  start_tag: v0.79.0
+  total_lines: 2115
+- pyclaw_percentage: 85.55
+  pyclaw_total: 225
+  end_date: '2025-04-04'
+  end_tag: v0.81.0
+  file_counts:
+    .github/workflows/check_pypi_version.yml:
+      Paul Gauthier: 11
+      Paul Gauthier (pyclaw): 75
+    .github/workflows/windows_check_pypi_version.yml:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 86
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier (pyclaw): 4
+    pyclaw/exceptions.py:
+      Paul Gauthier: 6
+      Paul Gauthier (pyclaw): 12
+    pyclaw/main.py:
+      Paul Gauthier (pyclaw): 40
+    pyclaw/models.py:
+      Paul Gauthier (pyclaw): 2
+    pyclaw/resources/model-settings.yml:
+      Paul Gauthier: 9
+      Paul Gauthier (pyclaw): 1
+    pyclaw/website/_includes/leaderboard.js:
+      Paul Gauthier (pyclaw): 5
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 1
+    pyclaw/website/index.html:
+      Paul Gauthier: 3
+    tests/basic/test_exceptions.py:
+      Paul Gauthier: 3
+  grand_total:
+    Paul Gauthier: 38
+    Paul Gauthier (pyclaw): 225
+  start_tag: v0.80.0
+  total_lines: 263
+- pyclaw_percentage: 91.85
+  pyclaw_total: 1567
+  end_date: '2025-04-14'
+  end_tag: v0.82.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args_formatter.py:
+      Paul Gauthier (pyclaw): 4
+    pyclaw/coders/__init__.py:
+      Paul Gauthier (pyclaw): 4
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 5
+    pyclaw/coders/editor_diff_fenced_coder.py:
+      Paul Gauthier (pyclaw): 9
+    pyclaw/coders/patch_coder.py:
+      Paul Gauthier (pyclaw): 679
+    pyclaw/coders/search_replace.py:
+      Paul Gauthier (pyclaw): 1
+    pyclaw/main.py:
+      Paul Gauthier (pyclaw): 1
+    pyclaw/models.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 25
+    pyclaw/resources/model-settings.yml:
+      Felix Lisczyk: 13
+      Paul Gauthier: 37
+      Paul Gauthier (pyclaw): 68
+    pyclaw/website/_includes/leaderboard.js:
+      Paul Gauthier: 38
+      Paul Gauthier (pyclaw): 6
+    pyclaw/website/_includes/leaderboard_table.js:
+      Paul Gauthier (pyclaw): 518
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 15
+      Paul Gauthier (pyclaw): 209
+    pyclaw/website/index.html:
+      Paul Gauthier: 28
+    scripts/homepage.py:
+      Paul Gauthier (pyclaw): 2
+    scripts/versionbump.py:
+      Paul Gauthier (pyclaw): 11
+    tests/basic/test_coder.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 25
+  grand_total:
+    Felix Lisczyk: 13
+    Paul Gauthier: 126
+    Paul Gauthier (pyclaw): 1567
+  start_tag: v0.81.0
+  total_lines: 1706
+- pyclaw_percentage: 66.89
+  pyclaw_total: 1735
+  end_date: '2025-05-09'
+  end_tag: v0.83.0
+  file_counts:
+    .github/workflows/check_pypi_version.yml:
+      Paul Gauthier (pyclaw): 1
+    .github/workflows/pre-commit.yml:
+      MDW: 48
+    .github/workflows/ubuntu-tests.yml:
+      Paul Gauthier (pyclaw): 1
+    .github/workflows/windows-tests.yml:
+      Paul Gauthier (pyclaw): 1
+    .github/workflows/windows_check_pypi_version.yml:
+      Paul Gauthier (pyclaw): 1
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Andrew Grigorev: 5
+      Andrew Grigorev (pyclaw): 21
+      Paul Gauthier (pyclaw): 38
+    pyclaw/coders/__init__.py:
+      Paul Gauthier (pyclaw): 2
+    pyclaw/coders/base_coder.py:
+      Andrew Grigorev (pyclaw): 2
+      Paul Gauthier: 60
+      Paul Gauthier (pyclaw): 104
+    pyclaw/coders/editblock_coder.py:
+      Paul Gauthier: 10
+      Paul Gauthier (pyclaw): 7
+      zjy1412: 2
+    pyclaw/coders/editblock_fenced_coder.py:
+      MDW: 1
+    pyclaw/coders/help_coder.py:
+      MDW: 1
+    pyclaw/coders/patch_coder.py:
+      Paul Gauthier (pyclaw): 38
+    pyclaw/coders/shell.py:
+      Paul Gauthier: 37
+    pyclaw/coders/udiff_coder.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 9
+    pyclaw/coders/udiff_simple.py:
+      Paul Gauthier (pyclaw): 14
+    pyclaw/commands.py:
+      Andrew Grigorev (pyclaw): 10
+      Paul Gauthier: 7
+      Paul Gauthier (pyclaw): 1
+    pyclaw/gui.py:
+      Jon Keys: 2
+    pyclaw/io.py:
+      Kay Gosho: 1
+      Paul Gauthier (pyclaw): 5
+    pyclaw/linter.py:
+      Paul Gauthier: 1
+      Titusz Pan: 1
+    pyclaw/main.py:
+      Paul Gauthier (pyclaw): 9
+    pyclaw/mdstream.py:
+      Paul Gauthier (pyclaw): 11
+    pyclaw/models.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 66
+      Stefan Hladnik: 4
+      Stefan Hladnik (pyclaw): 41
+    pyclaw/queries/tree-sitter-language-pack/ocaml_interface-tags.scm:
+      Andrey Popp: 98
+    pyclaw/queries/tree-sitter-languages/ocaml_interface-tags.scm:
+      Andrey Popp: 98
+    pyclaw/repo.py:
+      Andrew Grigorev (pyclaw): 136
+      Paul Gauthier: 6
+      Paul Gauthier (pyclaw): 33
+    pyclaw/repomap.py:
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 6
+    pyclaw/resources/model-settings.yml:
+      Paul Gauthier: 183
+      Paul Gauthier (pyclaw): 175
+      cantalupo555: 1
+    pyclaw/scrape.py:
+      Jon Keys: 12
+    pyclaw/utils.py:
+      Paul Gauthier: 13
+      Paul Gauthier (pyclaw): 131
+      Titusz Pan: 1
+    pyclaw/waiting.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 54
+    pyclaw/watch.py:
+      Paul Gauthier: 6
+      Paul Gauthier (pyclaw): 7
+    pyclaw/website/_includes/leaderboard_table.js:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 18
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 2
+    pyclaw/website/index.html:
+      Paul Gauthier: 13
+    benchmark/benchmark.py:
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 42
+    benchmark/docker.sh:
+      Paul Gauthier: 2
+    benchmark/refactor_tools.py:
+      MDW: 1
+    scripts/30k-image.py:
+      MDW: 1
+    scripts/clean_metadata.py:
+      Paul Gauthier (pyclaw): 258
+    scripts/update-history.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 7
+    tests/basic/test_coder.py:
+      Paul Gauthier (pyclaw): 3
+    tests/basic/test_commands.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 90
+    tests/basic/test_editblock.py:
+      Paul Gauthier: 10
+      zjy1412: 52
+    tests/basic/test_io.py:
+      Paul Gauthier (pyclaw): 132
+    tests/basic/test_linter.py:
+      Paul Gauthier: 22
+      Titusz Pan: 10
+    tests/basic/test_repo.py:
+      Andrew Grigorev: 1
+      Andrew Grigorev (pyclaw): 139
+      Paul Gauthier: 79
+      Paul Gauthier (pyclaw): 6
+    tests/basic/test_repomap.py:
+      Andrey Popp: 7
+    tests/basic/test_watch.py:
+      MDW: 1
+    tests/fixtures/languages/ocaml_interface/test.mli:
+      Andrey Popp: 14
+    tests/scrape/test_playwright_disable.py:
+      Andrew Grigorev (pyclaw): 111
+      Paul Gauthier: 25
+      Paul Gauthier (pyclaw): 3
+  grand_total:
+    Andrew Grigorev: 6
+    Andrew Grigorev (pyclaw): 419
+    Andrey Popp: 217
+    Jon Keys: 14
+    Kay Gosho: 1
+    MDW: 53
+    Paul Gauthier: 497
+    Paul Gauthier (pyclaw): 1275
+    Stefan Hladnik: 4
+    Stefan Hladnik (pyclaw): 41
+    Titusz Pan: 12
+    cantalupo555: 1
+    zjy1412: 54
+  start_tag: v0.82.0
+  total_lines: 2594
+- pyclaw_percentage: 78.92
+  pyclaw_total: 655
+  end_date: '2025-05-30'
+  end_tag: v0.84.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/args.py:
+      Paul Gauthier (pyclaw): 27
+      saviour: 2
+    pyclaw/args_formatter.py:
+      Paul Gauthier: 1
+    pyclaw/coders/base_coder.py:
+      Paul Gauthier: 4
+      Paul Gauthier (pyclaw): 10
+    pyclaw/commands.py:
+      Paul Gauthier (pyclaw): 23
+      wangboxue: 1
+    pyclaw/models.py:
+      Lih Chen: 15
+      Paul Gauthier: 16
+      Paul Gauthier (pyclaw): 12
+    pyclaw/onboarding.py:
+      Paul Gauthier: 2
+    pyclaw/openrouter.py:
+      Paul Gauthier (pyclaw): 120
+    pyclaw/repo.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 10
+    pyclaw/repomap.py:
+      Paul Gauthier (pyclaw): 1
+    pyclaw/resources/model-settings.yml:
+      Paul Gauthier: 71
+      Paul Gauthier (pyclaw): 193
+      Trung Dinh: 11
+    pyclaw/utils.py:
+      Paul Gauthier (pyclaw): 1
+    pyclaw/waiting.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 6
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 1
+    pyclaw/website/index.html:
+      Paul Gauthier: 43
+    scripts/update-history.py:
+      Paul Gauthier: 2
+    tests/basic/test_coder.py:
+      Paul Gauthier: 2
+      Paul Gauthier (pyclaw): 144
+    tests/basic/test_main.py:
+      Paul Gauthier (pyclaw): 28
+    tests/basic/test_models.py:
+      Paul Gauthier (pyclaw): 2
+    tests/basic/test_onboarding.py:
+      Paul Gauthier (pyclaw): 5
+    tests/basic/test_openrouter.py:
+      Paul Gauthier (pyclaw): 73
+  grand_total:
+    Lih Chen: 15
+    Paul Gauthier: 146
+    Paul Gauthier (pyclaw): 655
+    Trung Dinh: 11
+    saviour: 2
+    wangboxue: 1
+  start_tag: v0.83.0
+  total_lines: 830
+- pyclaw_percentage: 22.79
+  pyclaw_total: 139
+  end_date: '2025-06-27'
+  end_tag: v0.85.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/analytics.py:
+      Paul Gauthier: 5
+      Vasil Markoukin (pyclaw): 6
+    pyclaw/args.py:
+      Kyosuke Takayama: 6
+      Paul Gauthier: 5
+      Paul Gauthier (pyclaw): 2
+      Vasil Markoukin (pyclaw): 9
+      omarcinkonis: 6
+    pyclaw/coders/base_coder.py:
+      Kyosuke Takayama: 3
+      omarcinkonis: 3
+    pyclaw/coders/editblock_coder.py:
+      Mathis Beer (pyclaw): 1
+    pyclaw/coders/search_replace.py:
+      Emmanuel Ferdman: 1
+    pyclaw/commands.py:
+      Ali Ayas (claude-sonnet-4-20250514): 6
+      Matteo Landi: 16
+      Paul Gauthier: 4
+      omarcinkonis: 5
+    pyclaw/history.py:
+      jayeshthk: 18
+    pyclaw/io.py:
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 14
+      Vamsi Talupula: 5
+    pyclaw/main.py:
+      Kyosuke Takayama: 1
+      Makar Ivashko: 1
+      Paul Gauthier: 3
+      Vasil Markoukin (pyclaw): 5
+      omarcinkonis: 1
+    pyclaw/models.py:
+      Ali Ayas (claude-sonnet-4-20250514): 11
+      Nimesh Ghelani: 3
+      Paul Gauthier: 1
+      Sebastian Estrella: 11
+      Vincent Taverna: 32
+    pyclaw/queries/tree-sitter-language-pack/clojure-tags.scm:
+      Garrett Hopper: 7
+    pyclaw/queries/tree-sitter-language-pack/matlab-tags.scm:
+      Matthew Tofano: 4
+    pyclaw/queries/tree-sitter-languages/matlab-tags.scm:
+      Matthew Tofano: 4
+    pyclaw/repo.py:
+      Kyosuke Takayama: 3
+      Luke Reeves: 13
+      Paul Gauthier: 2
+      muravvv: 12
+    pyclaw/repomap.py:
+      Garrett Hopper: 2
+    pyclaw/resources/model-settings.yml:
+      Andrew Grigorev: 7
+      Leon Mergen: 20
+      Nimesh Ghelani: 15
+      Paul Gauthier: 1
+      Paul Gauthier (pyclaw): 21
+      Trung Dinh: 8
+      Wietse Venema: 9
+      therealmarv: 14
+    pyclaw/utils.py:
+      Paul Gauthier (pyclaw): 7
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 1
+    pyclaw/website/index.html:
+      Paul Gauthier: 8
+      Paul Gauthier (pyclaw): 1
+    benchmark/benchmark.py:
+      Paul Gauthier: 1
+    tests/basic/test_commands.py:
+      Matteo Landi: 22
+    tests/basic/test_history.py:
+      Paul Gauthier: 15
+    tests/basic/test_main.py:
+      Kyosuke Takayama: 10
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 64
+      omarcinkonis: 41
+    tests/basic/test_repo.py:
+      Luke Reeves: 31
+      Paul Gauthier: 2
+      muravvv: 22
+    tests/basic/test_repomap.py:
+      Matthew Tofano: 3
+      Paul Gauthier (pyclaw): 3
+    tests/fixtures/languages/clojure/test.clj:
+      Paul Gauthier (pyclaw): 6
+    tests/fixtures/languages/matlab/test.m:
+      Matthew Tofano: 42
+  grand_total:
+    Ali Ayas (claude-sonnet-4-20250514): 17
+    Andrew Grigorev: 7
+    Emmanuel Ferdman: 1
+    Garrett Hopper: 9
+    Kyosuke Takayama: 23
+    Leon Mergen: 20
+    Luke Reeves: 44
+    Makar Ivashko: 1
+    Mathis Beer (pyclaw): 1
+    Matteo Landi: 38
+    Matthew Tofano: 53
+    Nimesh Ghelani: 18
+    Paul Gauthier: 53
+    Paul Gauthier (pyclaw): 118
+    Sebastian Estrella: 11
+    Trung Dinh: 8
+    Vamsi Talupula: 5
+    Vasil Markoukin (pyclaw): 20
+    Vincent Taverna: 32
+    Wietse Venema: 9
+    jayeshthk: 18
+    muravvv: 34
+    omarcinkonis: 56
+    therealmarv: 14
+  start_tag: v0.84.0
+  total_lines: 610
+- pyclaw_percentage: 87.75
+  pyclaw_total: 222
+  end_date: '2025-08-09'
+  end_tag: v0.86.0
+  file_counts:
+    pyclaw/__init__.py:
+      Paul Gauthier: 1
+    pyclaw/analytics.py:
+      Paul Gauthier (pyclaw): 1
+    pyclaw/commands.py:
+      Paul Gauthier (pyclaw): 7
+      Zexin Yuan: 1
+    pyclaw/models.py:
+      Andrew Grigorev (pyclaw): 3
+      Paul Gauthier: 3
+      Paul Gauthier (pyclaw): 5
+    pyclaw/resources/model-settings.yml:
+      Jack Harrington: 7
+      Paul Gauthier: 6
+      Paul Gauthier (pyclaw): 199
+      Tamir Zahavi-Brunner: 7
+    pyclaw/website/_includes/leaderboard_table.js:
+      Paul Gauthier: 1
+    pyclaw/website/docs/leaderboards/index.md:
+      Paul Gauthier: 1
+    pyclaw/website/index.html:
+      Paul Gauthier: 3
+    scripts/blame.py:
+      Paul Gauthier (pyclaw): 7
+    scripts/update-history.py:
+      Paul Gauthier: 1
+  grand_total:
+    Andrew Grigorev (pyclaw): 3
+    Jack Harrington: 7
+    Paul Gauthier: 16
+    Paul Gauthier (pyclaw): 219
+    Tamir Zahavi-Brunner: 7
+    Zexin Yuan: 1
+  start_tag: v0.85.0
+  total_lines: 253

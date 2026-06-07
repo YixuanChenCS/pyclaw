@@ -1,0 +1,51 @@
+# macOS / editor
+.DS_Store
+.vscode/
+pyclaw.code-workspace
+
+# Python bytecode / cache
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+.venv*/
+venv/
+env/
+
+# Local env / secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Build / packaging artifacts
+build/
+dist/
+*.egg-info/
+
+# Project local files
+.pyclaw*
+pyclaw_chat.egg-info/
+
+# Generated version files
+pyclaw/__version__.py
+pyclaw/_version.py
+
+# Jekyll / website build
+Gemfile.lock
+_site/
+.jekyll-cache/
+.jekyll-metadata
+
+# Temp / local artifacts
+.#*
+tmp.benchmarks/
+.docker_bash_history
