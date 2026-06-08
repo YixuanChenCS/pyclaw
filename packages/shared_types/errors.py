@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Mapping
 
 
 class ErrorCode(str, Enum):
@@ -62,6 +63,21 @@ class ContractError(Exception):
     """Base exception for shared contract failures."""
 
 
+class ErrorCodeContractError(ContractError):
+    """Raised when a contract boundary can classify a failure with a stable error code."""
+
+    def __init__(
+        self,
+        error_code: ErrorCode,
+        message: str,
+        *,
+        details: Mapping[str, str] | None = None,
+    ):
+        super().__init__(message)
+        self.error_code = error_code
+        self.details = dict(details or {})
+
+
 class ContractSerializationError(ContractError):
     """Raised when a contract model cannot be serialized safely."""
 
@@ -87,6 +103,7 @@ __all__ = [
     "ContractError",
     "ContractSerializationError",
     "ErrorCode",
+    "ErrorCodeContractError",
     "EntityNotFoundError",
     "InvalidRunStateError",
     "WorkspaceLockedError",
