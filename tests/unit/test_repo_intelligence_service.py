@@ -206,6 +206,36 @@ class TestLocalRepoIntelligenceService(unittest.IsolatedAsyncioTestCase):
             self.assertIn(ErrorCode.WORKSPACE_BINARY_FILE.value, joined_warnings)
             self.assertIn(ErrorCode.WORKSPACE_FILE_TOO_LARGE.value, joined_warnings)
 
+    async def test_build_context_suppresses_background_binary_and_generated_warnings(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._init_git_repo(root)
+            (root / "main.py").write_text("print('ok')\n", encoding="utf-8")
+            website_assets = root / "website" / "assets"
+            website_assets.mkdir(parents=True)
+            (website_assets / "image.jpg").write_bytes(b"\xff\xd8\xff")
+            vendor_dir = root / "vendor"
+            vendor_dir.mkdir()
+            (vendor_dir / "bundle.min.js").write_text("console.log('x')\n", encoding="utf-8")
+            self._commit_all(root, "context with ignored assets")
+
+            service = LocalRepoIntelligenceService()
+            workspace = await service.inspect_workspace(Workspace(root_path=str(root)))
+            result = await service.build_context(
+                RepoContextRequest(
+                    workspace_id=workspace.workspace_id,
+                    run_id=new_run_id(),
+                    target_paths=("main.py",),
+                    max_files=4,
+                )
+            )
+
+            joined_warnings = "\n".join(result.warnings)
+            self.assertNotIn("image.jpg", joined_warnings)
+            self.assertNotIn("bundle.min.js", joined_warnings)
+            self.assertNotIn(ErrorCode.WORKSPACE_BINARY_FILE.value, joined_warnings)
+            self.assertNotIn(ErrorCode.WORKSPACE_GENERATED_OR_VENDOR_FILE.value, joined_warnings)
+
     async def test_search_symbols_returns_matching_tags(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -237,6 +267,115 @@ class TestLocalRepoIntelligenceService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(by_name["worker_service"].path, "main.py")
             self.assertEqual(by_name["worker_service"].line, 1)
 
+    async def test_search_symbols_deduplicates_identical_matches(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "main.py").write_text("def worker_service():\n    return 1\n", encoding="utf-8")
+
+            service = LocalRepoIntelligenceService()
+            workspace = await service.inspect_workspace(Workspace(root_path=str(root)))
+
+            class FakeTag:
+                def __init__(self, name: str, kind: str, line: int):
+                    self.name = name
+                    self.kind = kind
+                    self.line = line
+
+            class FakeRepoMap:
+                def get_tags(self, _fname: str, _rel_fname: str):
+                    return [
+                        FakeTag("worker_service", "function", 0),
+                        FakeTag("worker_service", "function", 0),
+                    ]
+
+            with patch.object(service, "_new_repo_map", return_value=FakeRepoMap()):
+                matches = await service.search_symbols(workspace, "worker")
+
+            self.assertEqual(len(matches), 1)
+            self.assertEqual(matches[0].name, "worker_service")
+
+    async def test_search_symbols_scans_beyond_old_default_file_limit(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            service = LocalRepoIntelligenceService()
+            workspace = await service.inspect_workspace(Workspace(root_path=str(root)))
+
+            candidate_paths = []
+            for index in range(80):
+                path = root / f"file_{index:03d}.py"
+                path.write_text("pass\n", encoding="utf-8")
+                candidate_paths.append(path)
+            target_path = root / "services" / "repomap.py"
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text("class RepoMap:\n    pass\n", encoding="utf-8")
+            candidate_paths.append(target_path)
+
+            class FakeTag:
+                def __init__(self, name: str, kind: str, line: int):
+                    self.name = name
+                    self.kind = kind
+                    self.line = line
+
+            class FakeRepoMap:
+                def get_tags(self, _fname: str, rel_fname: str):
+                    if rel_fname == "services/repomap.py":
+                        return [FakeTag("RepoMap", "class", 0)]
+                    return []
+
+            with (
+                patch.object(service, "_list_workspace_files", return_value=(candidate_paths, [])),
+                patch.object(service, "_new_repo_map", return_value=FakeRepoMap()),
+            ):
+                matches = await service.search_symbols(workspace, "RepoMap")
+
+            self.assertEqual(len(matches), 1)
+            self.assertEqual(matches[0].path, "services/repomap.py")
+
+    async def test_search_symbols_prioritizes_service_and_package_scopes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            service = LocalRepoIntelligenceService()
+            workspace = await service.inspect_workspace(Workspace(root_path=str(root)))
+
+            rel_paths = (
+                "pyclaw/repomap.py",
+                "tests/test_repomap.py",
+                "packages/shared_types/repomap.py",
+                "services/repo_intelligence/repomap.py",
+            )
+            candidate_paths = []
+            for rel_path in rel_paths:
+                path = root / rel_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("class RepoMap:\n    pass\n", encoding="utf-8")
+                candidate_paths.append(path)
+
+            class FakeTag:
+                def __init__(self, name: str, kind: str, line: int):
+                    self.name = name
+                    self.kind = kind
+                    self.line = line
+
+            class FakeRepoMap:
+                def get_tags(self, _fname: str, _rel_fname: str):
+                    return [FakeTag("RepoMap", "def", 0)]
+
+            with (
+                patch.object(service, "_list_workspace_files", return_value=(candidate_paths, [])),
+                patch.object(service, "_new_repo_map", return_value=FakeRepoMap()),
+            ):
+                matches = await service.search_symbols(workspace, "RepoMap")
+
+            self.assertEqual(
+                [match.path for match in matches[:4]],
+                [
+                    "services/repo_intelligence/repomap.py",
+                    "packages/shared_types/repomap.py",
+                    "pyclaw/repomap.py",
+                    "tests/test_repomap.py",
+                ],
+            )
+
     async def test_analyze_impact_finds_importers_and_dependencies(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -261,6 +400,18 @@ class TestLocalRepoIntelligenceService(unittest.IsolatedAsyncioTestCase):
             self.assertIn("pkg/helpers.py", impact.impacted_paths)
             self.assertIn("consumer.py", impact.impacted_paths)
             self.assertIn("pkg/api.py", impact.impacted_paths)
+
+    async def test_new_repo_map_uses_repo_intelligence_implementation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            service = LocalRepoIntelligenceService()
+            workspace = await service.inspect_workspace(Workspace(root_path=str(root)))
+
+            repo_map = service._new_repo_map(workspace)
+
+            from services.repo_intelligence.repomap import RepoMap
+
+            self.assertIsInstance(repo_map, RepoMap)
 
     async def test_refresh_index_invalidates_changed_file_analysis_cache(self):
         with tempfile.TemporaryDirectory() as tmpdir:

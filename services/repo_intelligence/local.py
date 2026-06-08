@@ -20,11 +20,13 @@ from packages.shared_types import (
     WorkspaceRef,
 )
 
+from .important_files import filter_important_files as _select_important_files
 from .service import RepoIntelligenceService
 
 DEFAULT_MAP_TOKENS = 2048
 DEFAULT_MAX_FILES = 16
 DEFAULT_OTHER_FILES_LIMIT = 64
+DEFAULT_SYMBOL_SEARCH_FILE_LIMIT = 512
 MAX_FILE_BYTES = 1024 * 1024
 MAX_SYMBOL_RESULTS = 50
 MAX_SNIPPET_LINES = 3
@@ -113,162 +115,6 @@ DEFAULT_GITIGNORE_PATTERNS = (
     ".pytest_cache/",
     "coverage/",
 )
-ROOT_IMPORTANT_FILES = {
-    ".gitignore",
-    ".gitattributes",
-    "README",
-    "README.md",
-    "README.txt",
-    "README.rst",
-    "CONTRIBUTING",
-    "CONTRIBUTING.md",
-    "CONTRIBUTING.txt",
-    "CONTRIBUTING.rst",
-    "LICENSE",
-    "LICENSE.md",
-    "LICENSE.txt",
-    "CHANGELOG",
-    "CHANGELOG.md",
-    "CHANGELOG.txt",
-    "CHANGELOG.rst",
-    "SECURITY",
-    "SECURITY.md",
-    "SECURITY.txt",
-    "CODEOWNERS",
-    "requirements.txt",
-    "Pipfile",
-    "Pipfile.lock",
-    "pyproject.toml",
-    "setup.py",
-    "setup.cfg",
-    "package.json",
-    "package-lock.json",
-    "yarn.lock",
-    "npm-shrinkwrap.json",
-    "Gemfile",
-    "Gemfile.lock",
-    "composer.json",
-    "composer.lock",
-    "pom.xml",
-    "build.gradle",
-    "build.gradle.kts",
-    "build.sbt",
-    "go.mod",
-    "go.sum",
-    "Cargo.toml",
-    "Cargo.lock",
-    "mix.exs",
-    "rebar.config",
-    "project.clj",
-    "Podfile",
-    "Cartfile",
-    "dub.json",
-    "dub.sdl",
-    ".env.example",
-    ".editorconfig",
-    "tsconfig.json",
-    "jsconfig.json",
-    ".babelrc",
-    "babel.config.js",
-    ".eslintrc",
-    ".eslintignore",
-    ".prettierrc",
-    ".stylelintrc",
-    "tslint.json",
-    ".pylintrc",
-    ".flake8",
-    ".rubocop.yml",
-    ".scalafmt.conf",
-    ".dockerignore",
-    ".gitpod.yml",
-    "sonar-project.properties",
-    "renovate.json",
-    "dependabot.yml",
-    ".pre-commit-config.yaml",
-    "mypy.ini",
-    "tox.ini",
-    ".yamllint",
-    "pyrightconfig.json",
-    "webpack.config.js",
-    "rollup.config.js",
-    "parcel.config.js",
-    "gulpfile.js",
-    "Gruntfile.js",
-    "build.xml",
-    "build.boot",
-    "project.json",
-    "build.cake",
-    "MANIFEST.in",
-    "pytest.ini",
-    "phpunit.xml",
-    "karma.conf.js",
-    "jest.config.js",
-    "cypress.json",
-    ".nycrc",
-    ".nycrc.json",
-    ".travis.yml",
-    ".gitlab-ci.yml",
-    "Jenkinsfile",
-    "azure-pipelines.yml",
-    "bitbucket-pipelines.yml",
-    "appveyor.yml",
-    "circle.yml",
-    ".circleci/config.yml",
-    ".github/dependabot.yml",
-    "codecov.yml",
-    ".coveragerc",
-    "Dockerfile",
-    "docker-compose.yml",
-    "docker-compose.override.yml",
-    "serverless.yml",
-    "firebase.json",
-    "now.json",
-    "netlify.toml",
-    "vercel.json",
-    "app.yaml",
-    "terraform.tf",
-    "main.tf",
-    "cloudformation.yaml",
-    "cloudformation.json",
-    "ansible.cfg",
-    "kubernetes.yaml",
-    "k8s.yaml",
-    "schema.sql",
-    "liquibase.properties",
-    "flyway.conf",
-    "next.config.js",
-    "nuxt.config.js",
-    "vue.config.js",
-    "angular.json",
-    "gatsby-config.js",
-    "gridsome.config.js",
-    "swagger.yaml",
-    "swagger.json",
-    "openapi.yaml",
-    "openapi.json",
-    ".nvmrc",
-    ".ruby-version",
-    ".python-version",
-    "Vagrantfile",
-    ".codeclimate.yml",
-    "mkdocs.yml",
-    "_config.yml",
-    "book.toml",
-    "readthedocs.yml",
-    ".readthedocs.yaml",
-    ".npmrc",
-    ".yarnrc",
-    ".isort.cfg",
-    ".markdownlint.json",
-    ".markdownlint.yaml",
-    ".bandit",
-    ".secrets.baseline",
-    ".pypirc",
-    ".gitkeep",
-    ".npmignore",
-}
-
-
 @dataclass(slots=True)
 class _StaticFileInfo:
     rel_path: str
@@ -385,17 +231,7 @@ def _find_src_files(directory: str) -> list[str]:
 
 
 def _filter_important_files(file_paths: Sequence[str]) -> list[str]:
-    important_files: list[str] = []
-    for file_path in file_paths:
-        normalized = Path(file_path).as_posix()
-        dir_name = str(Path(normalized).parent)
-        file_name = Path(normalized).name
-        if dir_name == ".github/workflows" and file_name.endswith(".yml"):
-            important_files.append(file_path)
-            continue
-        if normalized in ROOT_IMPORTANT_FILES:
-            important_files.append(file_path)
-    return important_files
+    return _select_important_files(file_paths)
 
 
 class LocalRepoIntelligenceService(RepoIntelligenceService):
@@ -499,6 +335,8 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
             )[:10]
         )
 
+        warnings = self._dedupe_strings(warnings)
+
         return RepoContextResult(
             workspace_id=request.workspace_id,
             run_id=request.run_id,
@@ -593,31 +431,38 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
 
         root = Path(workspace.root_path)
         matches: list[SymbolMatch] = []
+        seen_matches: set[tuple[str, str, str, int | None]] = set()
         needle = query.lower()
         try:
-            for path in files[:DEFAULT_OTHER_FILES_LIMIT]:
+            for path in self._rank_symbol_search_files(root, files, query):
                 rel_path = self._rel_path(root, path)
                 for tag in repo_map.get_tags(str(path), rel_path):
                     if needle not in tag.name.lower():
                         continue
+                    line = (tag.line + 1) if tag.line >= 0 else None
+                    match_key = (tag.name, tag.kind, rel_path, line)
+                    if match_key in seen_matches:
+                        continue
+                    seen_matches.add(match_key)
                     matches.append(
                         SymbolMatch(
                             name=tag.name,
                             kind=tag.kind,
                             path=rel_path,
-                            line=(tag.line + 1) if tag.line >= 0 else None,
+                            line=line,
                         )
                     )
-                    if len(matches) >= MAX_SYMBOL_RESULTS:
-                        return tuple(matches)
         except Exception as exc:
             raise ErrorCodeContractError(
                 ErrorCode.SYMBOL_SEARCH_FAILED,
                 f"Unable to search symbols for query {query!r}.",
                 details={"query": query, "reason": str(exc)},
             ) from exc
+        finally:
+            self._close_repo_map(repo_map)
 
-        return tuple(matches)
+        matches.sort(key=lambda match: self._symbol_match_rank(match, needle))
+        return tuple(matches[:MAX_SYMBOL_RESULTS])
 
     async def analyze_impact(
         self,
@@ -692,6 +537,8 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
                 warnings.append(self._warning(ErrorCode.WORKSPACE_FILE_TOO_LARGE, rel_path))
             elif self._is_binary_file(changed_path):
                 warnings.append(self._warning(ErrorCode.WORKSPACE_BINARY_FILE, rel_path))
+
+        warnings = self._dedupe_strings(warnings)
 
         return ImpactAnalysis(
             changed_paths=tuple(normalized),
@@ -794,6 +641,8 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
         self,
         workspace: WorkspaceRef,
         git_repo: Any | None,
+        *,
+        collect_filter_warnings: bool = False,
     ) -> tuple[list[Path], list[str]]:
         root = Path(workspace.root_path)
         raw_paths: list[Path] = []
@@ -803,7 +652,12 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
                 raw_paths.append(root / rel_path)
         else:
             raw_paths.extend(Path(path) for path in _find_src_files(str(root)))
-        return self._filter_workspace_files(root, raw_paths, warnings)
+        return self._filter_workspace_files(
+            root,
+            raw_paths,
+            warnings,
+            collect_filter_warnings=collect_filter_warnings,
+        )
 
     def _select_context_files(
         self,
@@ -815,6 +669,7 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
         root = Path(workspace.root_path)
         available_files, warnings = self._list_workspace_files(workspace, git_repo)
         available_by_resolved = {path.resolve(): path for path in available_files}
+        ignore_spec = _load_gitignores(self._gitignore_paths(root))
 
         requested_files: list[Path] = []
         for target_path in target_paths:
@@ -825,6 +680,10 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
                     continue
                 if resolved in available_by_resolved:
                     requested_files.append(available_by_resolved[resolved])
+                    continue
+                warning = self._target_filter_warning(root, resolved, ignore_spec)
+                if warning is not None:
+                    warnings.append(warning)
 
         requested_files = self._dedupe_paths(requested_files)
         important_files = self._important_files(root, available_files)
@@ -871,6 +730,8 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
         root: Path,
         raw_paths: Iterable[Path],
         warnings: list[str],
+        *,
+        collect_filter_warnings: bool = False,
     ) -> tuple[list[Path], list[str]]:
         ignore_spec = _load_gitignores(self._gitignore_paths(root))
         kept: list[Path] = []
@@ -896,17 +757,20 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
             if ignore_spec and ignore_spec.match_file(rel_path):
                 continue
             if self._is_generated_or_vendor_file(rel_path):
-                warnings.append(self._warning(ErrorCode.WORKSPACE_GENERATED_OR_VENDOR_FILE, rel_path))
+                if collect_filter_warnings:
+                    warnings.append(self._warning(ErrorCode.WORKSPACE_GENERATED_OR_VENDOR_FILE, rel_path))
                 continue
             if rel_path in seen:
                 continue
 
             size = path.stat().st_size
             if size > self.max_file_bytes:
-                warnings.append(self._warning(ErrorCode.WORKSPACE_FILE_TOO_LARGE, rel_path))
+                if collect_filter_warnings:
+                    warnings.append(self._warning(ErrorCode.WORKSPACE_FILE_TOO_LARGE, rel_path))
                 continue
             if self._is_binary_file(path):
-                warnings.append(self._warning(ErrorCode.WORKSPACE_BINARY_FILE, rel_path))
+                if collect_filter_warnings:
+                    warnings.append(self._warning(ErrorCode.WORKSPACE_BINARY_FILE, rel_path))
                 continue
 
             kept.append(path)
@@ -972,16 +836,19 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
         repo_map = self._new_repo_map(workspace)
         if repo_map is None:
             return None
-        return repo_map.get_repo_map(
-            chat_files=[str(path) for path in context_files],
-            other_files=[str(path) for path in other_files],
-            mentioned_fnames=mentioned_fnames,
-            mentioned_idents=mentioned_idents,
-        )
+        try:
+            return repo_map.get_repo_map(
+                chat_files=[str(path) for path in context_files],
+                other_files=[str(path) for path in other_files],
+                mentioned_fnames=mentioned_fnames,
+                mentioned_idents=mentioned_idents,
+            )
+        finally:
+            self._close_repo_map(repo_map)
 
     def _new_repo_map(self, workspace: WorkspaceRef) -> Any | None:
         try:
-            from pyclaw.repomap import RepoMap
+            from .repomap import RepoMap
         except Exception:
             return None
         return RepoMap(
@@ -991,6 +858,36 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
             io=_RepoServiceIO(),
             refresh="files",
         )
+
+    def _close_repo_map(self, repo_map: Any | None) -> None:
+        if repo_map is None:
+            return
+        close = getattr(repo_map, "close", None)
+        if callable(close):
+            close()
+
+    def _target_filter_warning(
+        self,
+        root: Path,
+        path: Path,
+        ignore_spec: Any,
+    ) -> str | None:
+        try:
+            rel_path = path.relative_to(root).as_posix()
+        except ValueError:
+            return self._warning(ErrorCode.WORKSPACE_SYMLINK_ESCAPE, str(path))
+
+        if ignore_spec and ignore_spec.match_file(rel_path):
+            return None
+        if self._is_generated_or_vendor_file(rel_path):
+            return self._warning(ErrorCode.WORKSPACE_GENERATED_OR_VENDOR_FILE, rel_path)
+
+        size = path.stat().st_size
+        if size > self.max_file_bytes:
+            return self._warning(ErrorCode.WORKSPACE_FILE_TOO_LARGE, rel_path)
+        if self._is_binary_file(path):
+            return self._warning(ErrorCode.WORKSPACE_BINARY_FILE, rel_path)
+        return None
 
     def _gitignore_paths(self, root: Path) -> list[Path]:
         candidates = [root / ".gitignore"]
@@ -1237,6 +1134,71 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
             seen.add(key)
             result.append(path)
         return result
+
+    def _dedupe_strings(self, values: Sequence[str]) -> list[str]:
+        seen: set[str] = set()
+        result: list[str] = []
+        for value in values:
+            if value in seen:
+                continue
+            seen.add(value)
+            result.append(value)
+        return result
+
+    def _rank_symbol_search_files(
+        self,
+        root: Path,
+        files: Sequence[Path],
+        query: str,
+    ) -> list[Path]:
+        needle = query.lower()
+        important_files = {
+            str(path.resolve())
+            for path in self._important_files(root, files)
+        }
+
+        def rank_key(path: Path) -> tuple[int, int, int, int, str]:
+            rel_path = self._rel_path(root, path)
+            path_key = rel_path.lower()
+            return (
+                0 if needle in path.name.lower() else 1,
+                0 if needle in path_key else 1,
+                self._symbol_search_scope_rank(rel_path),
+                0 if _filename_to_lang(path.name) else 1,
+                0 if str(path.resolve()) in important_files else 1,
+                path_key,
+            )
+
+        ranked = sorted(self._dedupe_paths(files), key=rank_key)
+        return ranked[:DEFAULT_SYMBOL_SEARCH_FILE_LIMIT]
+
+    def _symbol_match_rank(self, match: SymbolMatch, needle: str) -> tuple[int, int, int, int, str, int]:
+        name_key = match.name.lower()
+        path_key = match.path.lower()
+        return (
+            0 if name_key == needle else 1,
+            0 if name_key.startswith(needle) else 1,
+            self._symbol_search_scope_rank(match.path),
+            0 if match.kind == "def" else 1,
+            path_key,
+            match.line or 0,
+        )
+
+    def _symbol_search_scope_rank(self, rel_path: str) -> int:
+        normalized = rel_path.replace("\\", "/")
+        if normalized.startswith("services/"):
+            return 0
+        if normalized.startswith("packages/"):
+            return 1
+        if normalized.startswith("apps/"):
+            return 2
+        if normalized.startswith("scripts/"):
+            return 3
+        if normalized.startswith("pyclaw/"):
+            return 4
+        if normalized.startswith("tests/"):
+            return 5
+        return 6
 
     def _rel_path(self, root: Path, path: Path) -> str:
         return path.resolve().relative_to(root).as_posix()

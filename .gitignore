@@ -48,4 +48,6 @@ _site/
 # Temp / local artifacts
 .#*
 tmp.benchmarks/
-.docker_bash_history
+.docker_bash_historyrepo_intelligence_tags_cache_v4/
+.repo_intelligence_tags_cache.v4/
+.repo_intelligence.tags.cache.v4/

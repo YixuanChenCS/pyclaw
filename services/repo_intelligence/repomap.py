@@ -1,35 +1,60 @@
-"""Legacy RepoMap kept for reference and old pyclaw flows.
+"""Authoritative RepoMap implementation for the repo_intelligence service boundary."""
 
-New service/runtime work should use services.repo_intelligence.repomap.RepoMap instead.
-"""
-
-import colorsys
 import math
 import os
-import random
 import shutil
 import sqlite3
-import sys
 import time
 import warnings
 from collections import Counter, defaultdict, namedtuple
 from importlib import resources
 from pathlib import Path
 
-from diskcache import Cache
-from grep_ast import TreeContext, filename_to_lang
-from pygments.lexers import guess_lexer_for_filename
-from pygments.token import Token
-from tqdm import tqdm
-from tree_sitter import Query
+try:
+    from diskcache import Cache
+except ImportError:
+    Cache = None
 
-from pyclaw.dump import dump
-from pyclaw.special import filter_important_files
-from pyclaw.waiting import Spinner
+try:
+    from grep_ast import TreeContext, filename_to_lang
+except ImportError:
+    TreeContext = None
+
+    def filename_to_lang(_fname):
+        return None
+
+try:
+    from pygments.lexers import guess_lexer_for_filename
+    from pygments.token import Token
+except ImportError:
+    guess_lexer_for_filename = None
+    Token = None
+
+try:
+    from tqdm import tqdm
+except ImportError:
+    def tqdm(iterable, **_kwargs):
+        return iterable
+
+try:
+    from tree_sitter import Query
+except ImportError:
+    Query = None
+
+from .important_files import filter_important_files
 
 # tree_sitter is throwing a FutureWarning
 warnings.simplefilter("ignore", category=FutureWarning)
-from grep_ast.tsl import USING_TSL_PACK, get_language, get_parser  # noqa: E402
+try:
+    from grep_ast.tsl import USING_TSL_PACK, get_language, get_parser  # noqa: E402
+except ImportError:
+    USING_TSL_PACK = False
+
+    def get_language(_lang):
+        raise ImportError("grep_ast.tsl is unavailable")
+
+    def get_parser(_lang):
+        raise ImportError("grep_ast.tsl is unavailable")
 
 Tag = namedtuple("Tag", "rel_fname fname line name kind".split())
 
@@ -44,8 +69,23 @@ if USING_TSL_PACK:
 UPDATING_REPO_MAP_MESSAGE = "Updating repo map"
 
 
+class _Spinner:
+    def __init__(self, io, message):
+        self.io = io
+        self.message = message
+
+    def step(self, message=None):
+        if not self.io or not getattr(self.io, "tool_output", None):
+            return
+        if message and message != self.message:
+            self.io.tool_output(message)
+
+    def end(self):
+        return None
+
+
 class RepoMap:
-    TAGS_CACHE_DIR = f".pyclaw.tags.cache.v{CACHE_VERSION}"
+    TAGS_CACHE_DIR = f".repo_intelligence.tags.cache.v{CACHE_VERSION}"
 
     warned_files = set()
 
@@ -64,6 +104,7 @@ class RepoMap:
         self.io = io
         self.verbose = verbose
         self.refresh = refresh
+        self._closed = False
 
         if not root:
             root = os.getcwd()
@@ -90,6 +131,30 @@ class RepoMap:
             self.io.tool_output(
                 f"RepoMap initialized with map_mul_no_files: {self.map_mul_no_files}"
             )
+
+    def close(self):
+        if self._closed:
+            return
+
+        cache = getattr(self, "TAGS_CACHE", None)
+        if cache is not None and hasattr(cache, "close"):
+            try:
+                cache.close()
+            except Exception:
+                pass
+
+        self.TAGS_CACHE = dict()
+        self._closed = True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
+
+    def __del__(self):
+        self.close()
 
     def token_count(self, text):
         len_text = len(text)
@@ -197,6 +262,8 @@ class RepoMap:
                 shutil.rmtree(path)
 
             # Try to create new cache
+            if Cache is None:
+                raise RuntimeError("diskcache is unavailable")
             new_cache = Cache(path)
 
             # Test that it works
@@ -221,6 +288,9 @@ class RepoMap:
 
     def load_tags_cache(self):
         path = Path(self.root) / self.TAGS_CACHE_DIR
+        if Cache is None:
+            self.TAGS_CACHE = dict()
+            return
         try:
             self.TAGS_CACHE = Cache(path)
         except SQLITE_ERRORS as e:
@@ -648,7 +718,7 @@ class RepoMap:
         if not mentioned_idents:
             mentioned_idents = set()
 
-        spin = Spinner(UPDATING_REPO_MAP_MESSAGE)
+        spin = _Spinner(self.io, UPDATING_REPO_MAP_MESSAGE)
 
         ranked_tags = self.get_ranked_tags(
             chat_fnames,
@@ -798,15 +868,6 @@ def find_src_files(directory):
         for file in files:
             src_files.append(os.path.join(root, file))
     return src_files
-
-
-def get_random_color():
-    hue = random.random()
-    r, g, b = [int(x * 255) for x in colorsys.hsv_to_rgb(hue, 1, 0.75)]
-    res = f"#{r:02x}{g:02x}{b:02x}"
-    return res
-
-
 def get_scm_fname(lang):
     # Load the tags queries
     if USING_TSL_PACK:
@@ -852,21 +913,3 @@ def get_supported_languages_md():
     res += "\n"
 
     return res
-
-
-if __name__ == "__main__":
-    fnames = sys.argv[1:]
-
-    chat_fnames = []
-    other_fnames = []
-    for fname in sys.argv[1:]:
-        if Path(fname).is_dir():
-            chat_fnames += find_src_files(fname)
-        else:
-            chat_fnames.append(fname)
-
-    rm = RepoMap(root=".")
-    repo_map = rm.get_ranked_tags_map(chat_fnames, other_fnames)
-
-    dump(len(repo_map))
-    print(repo_map)

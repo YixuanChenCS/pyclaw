@@ -6,6 +6,8 @@ pyclaw is an experimental local coding-agent platform for learning how to refact
 
 This repository is an early development skeleton. The current focus is on service boundaries, shared contracts, and local-first agent runtime design.
 
+Current repo-intelligence migration status is tracked in `docs/repo_intelligence_migration_status.md`.
+
 ## Architecture
 
 ```text
