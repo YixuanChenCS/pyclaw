@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import replace
+import ast
+from dataclasses import dataclass, replace
 import math
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
 from typing import Any, Iterable, Sequence
@@ -48,6 +49,275 @@ except ImportError:
     def _filename_to_lang(_fname: str) -> str | None:
         return None
 
+try:
+    from pathspec import PathSpec as _PathSpec
+    from pathspec.patterns import GitWildMatchPattern as _GitWildMatchPattern
+except ImportError:
+    _PathSpec = None
+    _GitWildMatchPattern = None
+
+try:
+    import git as _git
+except ImportError:
+    _git = None
+
+_ANY_GIT_ERROR = (
+    OSError,
+    IndexError,
+    BufferError,
+    TypeError,
+    ValueError,
+    AttributeError,
+    AssertionError,
+    TimeoutError,
+)
+if _git is not None:
+    _ANY_GIT_ERROR = (
+        _git.exc.ODBError,
+        _git.exc.GitError,
+        _git.exc.InvalidGitRepositoryError,
+        _git.exc.GitCommandNotFound,
+    ) + _ANY_GIT_ERROR
+
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp", ".pdf"}
+DEFAULT_GITIGNORE_PATTERNS = (
+    ".pyclaw*",
+    ".git",
+    "*~",
+    "*.bak",
+    "*.swp",
+    "*.swo",
+    "\\#*\\#",
+    ".#*",
+    "*.tmp",
+    "*.temp",
+    "*.orig",
+    "*.pyc",
+    "__pycache__/",
+    ".DS_Store",
+    "Thumbs.db",
+    "*.svg",
+    "*.pdf",
+    ".idea/",
+    ".vscode/",
+    "*.sublime-*",
+    ".project",
+    ".settings/",
+    "*.code-workspace",
+    ".env",
+    ".venv/",
+    "node_modules/",
+    "vendor/",
+    "*.log",
+    ".cache/",
+    ".pytest_cache/",
+    "coverage/",
+)
+ROOT_IMPORTANT_FILES = {
+    ".gitignore",
+    ".gitattributes",
+    "README",
+    "README.md",
+    "README.txt",
+    "README.rst",
+    "CONTRIBUTING",
+    "CONTRIBUTING.md",
+    "CONTRIBUTING.txt",
+    "CONTRIBUTING.rst",
+    "LICENSE",
+    "LICENSE.md",
+    "LICENSE.txt",
+    "CHANGELOG",
+    "CHANGELOG.md",
+    "CHANGELOG.txt",
+    "CHANGELOG.rst",
+    "SECURITY",
+    "SECURITY.md",
+    "SECURITY.txt",
+    "CODEOWNERS",
+    "requirements.txt",
+    "Pipfile",
+    "Pipfile.lock",
+    "pyproject.toml",
+    "setup.py",
+    "setup.cfg",
+    "package.json",
+    "package-lock.json",
+    "yarn.lock",
+    "npm-shrinkwrap.json",
+    "Gemfile",
+    "Gemfile.lock",
+    "composer.json",
+    "composer.lock",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "build.sbt",
+    "go.mod",
+    "go.sum",
+    "Cargo.toml",
+    "Cargo.lock",
+    "mix.exs",
+    "rebar.config",
+    "project.clj",
+    "Podfile",
+    "Cartfile",
+    "dub.json",
+    "dub.sdl",
+    ".env.example",
+    ".editorconfig",
+    "tsconfig.json",
+    "jsconfig.json",
+    ".babelrc",
+    "babel.config.js",
+    ".eslintrc",
+    ".eslintignore",
+    ".prettierrc",
+    ".stylelintrc",
+    "tslint.json",
+    ".pylintrc",
+    ".flake8",
+    ".rubocop.yml",
+    ".scalafmt.conf",
+    ".dockerignore",
+    ".gitpod.yml",
+    "sonar-project.properties",
+    "renovate.json",
+    "dependabot.yml",
+    ".pre-commit-config.yaml",
+    "mypy.ini",
+    "tox.ini",
+    ".yamllint",
+    "pyrightconfig.json",
+    "webpack.config.js",
+    "rollup.config.js",
+    "parcel.config.js",
+    "gulpfile.js",
+    "Gruntfile.js",
+    "build.xml",
+    "build.boot",
+    "project.json",
+    "build.cake",
+    "MANIFEST.in",
+    "pytest.ini",
+    "phpunit.xml",
+    "karma.conf.js",
+    "jest.config.js",
+    "cypress.json",
+    ".nycrc",
+    ".nycrc.json",
+    ".travis.yml",
+    ".gitlab-ci.yml",
+    "Jenkinsfile",
+    "azure-pipelines.yml",
+    "bitbucket-pipelines.yml",
+    "appveyor.yml",
+    "circle.yml",
+    ".circleci/config.yml",
+    ".github/dependabot.yml",
+    "codecov.yml",
+    ".coveragerc",
+    "Dockerfile",
+    "docker-compose.yml",
+    "docker-compose.override.yml",
+    "serverless.yml",
+    "firebase.json",
+    "now.json",
+    "netlify.toml",
+    "vercel.json",
+    "app.yaml",
+    "terraform.tf",
+    "main.tf",
+    "cloudformation.yaml",
+    "cloudformation.json",
+    "ansible.cfg",
+    "kubernetes.yaml",
+    "k8s.yaml",
+    "schema.sql",
+    "liquibase.properties",
+    "flyway.conf",
+    "next.config.js",
+    "nuxt.config.js",
+    "vue.config.js",
+    "angular.json",
+    "gatsby-config.js",
+    "gridsome.config.js",
+    "swagger.yaml",
+    "swagger.json",
+    "openapi.yaml",
+    "openapi.json",
+    ".nvmrc",
+    ".ruby-version",
+    ".python-version",
+    "Vagrantfile",
+    ".codeclimate.yml",
+    "mkdocs.yml",
+    "_config.yml",
+    "book.toml",
+    "readthedocs.yml",
+    ".readthedocs.yaml",
+    ".npmrc",
+    ".yarnrc",
+    ".isort.cfg",
+    ".markdownlint.json",
+    ".markdownlint.yaml",
+    ".bandit",
+    ".secrets.baseline",
+    ".pypirc",
+    ".gitkeep",
+    ".npmignore",
+}
+
+
+@dataclass(slots=True)
+class _StaticFileInfo:
+    rel_path: str
+    path: Path
+    module_name: str | None
+    is_package: bool
+    imports: frozenset[str]
+    symbols: frozenset[str]
+    identifiers: frozenset[str]
+
+
+@dataclass(slots=True)
+class _WorkspaceState:
+    workspace: WorkspaceRef
+    static_info_cache: dict[str, _StaticFileInfo]
+
+
+class _LocalGitRepo:
+    def __init__(self, root: str, io: _RepoServiceIO) -> None:
+        self.root = root
+        self.io = io
+        self.git_repo_error: str | None = None
+
+    def get_tracked_files(self) -> list[str]:
+        try:
+            completed = subprocess.run(
+                ["git", "-C", self.root, "ls-files", "-z", "--cached"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except OSError as exc:
+            self.git_repo_error = str(exc)
+            self.io.tool_error(f"Unable to list files in git repo: {exc}")
+            return []
+
+        if completed.returncode != 0:
+            error = completed.stderr.strip() or completed.stdout.strip() or "git ls-files failed"
+            self.git_repo_error = error
+            self.io.tool_error(f"Unable to list files in git repo: {error}")
+            return []
+
+        tracked = []
+        for entry in completed.stdout.split("\0"):
+            if not entry:
+                continue
+            tracked.append(str(PurePosixPath(entry)))
+        return tracked
+
 
 class _RepoServiceIO:
     def __init__(self) -> None:
@@ -84,69 +354,48 @@ class _ApproxTokenCounter:
 
 def _safe_abs_path(path: Path | str) -> str:
     try:
-        from pyclaw.utils import safe_abs_path as helper
-
-        return helper(path)
-    except Exception:
         return str(Path(path).resolve())
+    except Exception:
+        return str(Path(path).absolute())
 
 
 def _is_image_name(file_name: str) -> bool:
-    try:
-        from pyclaw.utils import is_image_file as helper
-
-        return helper(file_name)
-    except Exception:
-        return Path(file_name).suffix.lower() in {
-            ".png",
-            ".jpg",
-            ".jpeg",
-            ".gif",
-            ".bmp",
-            ".tiff",
-            ".webp",
-            ".pdf",
-        }
-
-
-def _load_git_backend() -> tuple[tuple[type[BaseException], ...], Any, Any]:
-    try:
-        from pyclaw.repo import ANY_GIT_ERROR, GitRepo, git
-
-        return ANY_GIT_ERROR, GitRepo, git
-    except Exception:
-        return (OSError, ValueError, RuntimeError), None, None
+    return Path(file_name).suffix.lower() in IMAGE_EXTENSIONS
 
 
 def _load_gitignores(paths: Sequence[Path]) -> Any:
-    try:
-        from pyclaw.watch import load_gitignores as helper
-
-        return helper(list(paths))
-    except Exception:
+    if _PathSpec is None or _GitWildMatchPattern is None:
         return None
+    patterns = list(DEFAULT_GITIGNORE_PATTERNS)
+    for path in paths:
+        if not path.exists():
+            continue
+        try:
+            patterns.extend(path.read_text(encoding="utf-8", errors="replace").splitlines())
+        except OSError:
+            continue
+    return _PathSpec.from_lines(_GitWildMatchPattern, patterns) if patterns else None
 
 
 def _find_src_files(directory: str) -> list[str]:
-    try:
-        from pyclaw.repomap import find_src_files as helper
-
-        return helper(directory)
-    except Exception:
-        root = Path(directory)
-        if root.is_file():
-            return [str(root)]
-        return [str(path) for path in root.rglob("*") if path.is_file()]
+    root = Path(directory)
+    if root.is_file():
+        return [str(root)]
+    return [str(path) for path in root.rglob("*") if path.is_file()]
 
 
 def _filter_important_files(file_paths: Sequence[str]) -> list[str]:
-    try:
-        from pyclaw.special import filter_important_files as helper
-
-        return helper(list(file_paths))
-    except Exception:
-        important_names = {"README.md", "CONTRIBUTING.md", "LICENSE.txt", "pyproject.toml", "pytest.ini"}
-        return [path for path in file_paths if Path(path).name in important_names]
+    important_files: list[str] = []
+    for file_path in file_paths:
+        normalized = Path(file_path).as_posix()
+        dir_name = str(Path(normalized).parent)
+        file_name = Path(normalized).name
+        if dir_name == ".github/workflows" and file_name.endswith(".yml"):
+            important_files.append(file_path)
+            continue
+        if normalized in ROOT_IMPORTANT_FILES:
+            important_files.append(file_path)
+    return important_files
 
 
 class LocalRepoIntelligenceService(RepoIntelligenceService):
@@ -162,7 +411,7 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
         self.map_tokens = map_tokens
         self.default_max_files = default_max_files
         self.max_file_bytes = max_file_bytes
-        self._workspaces: dict[str, WorkspaceRef] = {}
+        self._workspaces: dict[str, _WorkspaceState] = {}
 
     async def inspect_workspace(self, workspace: WorkspaceRef) -> WorkspaceRef:
         raw_root = Path(workspace.root_path).expanduser()
@@ -187,7 +436,15 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
             branch=branch,
             commit_sha=commit_sha,
         )
-        self._workspaces[str(inspected.workspace_id)] = inspected
+        workspace_key = str(inspected.workspace_id)
+        existing = self._workspaces.get(workspace_key)
+        static_info_cache: dict[str, _StaticFileInfo] = {}
+        if existing is not None and self._can_reuse_workspace_cache(existing.workspace, inspected):
+            static_info_cache = existing.static_info_cache
+        self._workspaces[workspace_key] = _WorkspaceState(
+            workspace=inspected,
+            static_info_cache=static_info_cache,
+        )
         return inspected
 
     async def build_context(self, request: RepoContextRequest) -> RepoContextResult:
@@ -252,11 +509,17 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
         )
 
     async def refresh_index(self, workspace: WorkspaceRef, changed_files: Sequence[str]) -> None:
-        # TODO: Replace this validation-only no-op when repo_intelligence owns durable index state.
         inspected = await self.inspect_workspace(workspace)
+        state = self._require_workspace_state(inspected.workspace_id)
         root = Path(inspected.root_path)
         for changed_file in changed_files:
-            self._resolve_workspace_member(root, changed_file, must_exist=False)
+            try:
+                candidate = self._resolve_workspace_member(root, changed_file, must_exist=False)
+            except ErrorCodeContractError:
+                state.static_info_cache.pop(changed_file, None)
+                raise
+            rel_path = self._rel_path(root, candidate)
+            state.static_info_cache.pop(rel_path, None)
 
     async def summarize_files(
         self,
@@ -364,19 +627,75 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
         root = Path(workspace.root_path)
         normalized: list[str] = []
         warnings: list[str] = []
+        changed_paths: list[Path] = []
         for raw_file in files:
             try:
                 path = self._resolve_workspace_member(root, raw_file)
             except ErrorCodeContractError as exc:
                 warnings.append(self._warning(exc.error_code, str(raw_file)))
                 continue
-            normalized.append(self._rel_path(root, path))
+            rel_path = self._rel_path(root, path)
+            normalized.append(rel_path)
+            changed_paths.append(path)
 
-        # TODO: Replace this echo model with dependency-aware impact analysis after repo index state
-        # becomes durable and can be queried by agent_core/runtime.
+        git_repo, _repo_io = self._open_git_repo(workspace)
+        workspace_files, inventory_warnings = self._list_workspace_files(workspace, git_repo)
+        warnings.extend(inventory_warnings)
+
+        workspace_by_rel = {self._rel_path(root, path): path for path in workspace_files}
+        static_infos, info_warnings = self._collect_static_file_info(root, workspace_files, workspace)
+        warnings.extend(info_warnings)
+
+        changed_infos = [
+            static_infos[rel_path]
+            for rel_path in normalized
+            if rel_path in static_infos
+        ]
+        impacted_paths = list(normalized)
+        impacted_seen = set(impacted_paths)
+
+        module_to_paths: dict[str, set[str]] = {}
+        for info in static_infos.values():
+            if info.module_name:
+                module_to_paths.setdefault(info.module_name, set()).add(info.rel_path)
+
+        changed_modules = {info.module_name for info in changed_infos if info.module_name}
+        changed_symbols: set[str] = set()
+        for info in changed_infos:
+            changed_symbols.update(info.symbols)
+
+        for info in changed_infos:
+            for imported_module in info.imports:
+                for rel_path in self._resolve_local_module_paths(imported_module, module_to_paths):
+                    if rel_path not in impacted_seen:
+                        impacted_paths.append(rel_path)
+                        impacted_seen.add(rel_path)
+
+        for info in static_infos.values():
+            if info.rel_path in impacted_seen:
+                continue
+            if self._imports_changed_module(info.imports, changed_modules):
+                impacted_paths.append(info.rel_path)
+                impacted_seen.add(info.rel_path)
+                continue
+            if changed_symbols and changed_symbols.intersection(info.identifiers):
+                impacted_paths.append(info.rel_path)
+                impacted_seen.add(info.rel_path)
+
+        for changed_path in changed_paths:
+            rel_path = self._rel_path(root, changed_path)
+            if rel_path in workspace_by_rel:
+                continue
+            if self._is_generated_or_vendor_file(rel_path):
+                warnings.append(self._warning(ErrorCode.WORKSPACE_GENERATED_OR_VENDOR_FILE, rel_path))
+            elif changed_path.stat().st_size > self.max_file_bytes:
+                warnings.append(self._warning(ErrorCode.WORKSPACE_FILE_TOO_LARGE, rel_path))
+            elif self._is_binary_file(changed_path):
+                warnings.append(self._warning(ErrorCode.WORKSPACE_BINARY_FILE, rel_path))
+
         return ImpactAnalysis(
             changed_paths=tuple(normalized),
-            impacted_paths=tuple(normalized),
+            impacted_paths=tuple(impacted_paths),
             warnings=tuple(warnings),
         )
 
@@ -393,7 +712,8 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
         if not watched_paths:
             watched_paths = [str(root)]
 
-        # TODO: Bind this descriptor to a live watcher once execution_runtime manages subscriptions.
+        # This MVP only returns a watch descriptor for runtime to consume later.
+        # It does not start a live watcher or emit change events.
         return WatchSubscription(
             workspace_id=workspace.workspace_id,
             subscription_id=f"watch_{workspace.workspace_id}",
@@ -426,23 +746,22 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
         return resolved
 
     def _detect_git_workspace(self, resolved_root: Path) -> tuple[Path, str | None, str | None]:
-        any_git_error, _git_repo_cls, git_module = _load_git_backend()
-        if git_module is not None:
+        if _git is not None:
             try:
-                repo = git_module.Repo(resolved_root, search_parent_directories=True)
+                repo = _git.Repo(resolved_root, search_parent_directories=True)
                 git_root = Path(_safe_abs_path(repo.working_tree_dir))
                 branch = None
                 commit_sha = None
                 try:
                     branch = repo.active_branch.name
-                except (TypeError, ValueError, AttributeError) + any_git_error:
+                except (TypeError, ValueError, AttributeError) + _ANY_GIT_ERROR:
                     branch = None
                 try:
                     commit_sha = repo.head.commit.hexsha
-                except (TypeError, ValueError, AttributeError) + any_git_error:
+                except (TypeError, ValueError, AttributeError) + _ANY_GIT_ERROR:
                     commit_sha = None
                 return git_root, branch, commit_sha
-            except any_git_error:
+            except _ANY_GIT_ERROR:
                 return resolved_root, None, None
 
         git_root = self._run_git(resolved_root, "rev-parse", "--show-toplevel")
@@ -453,25 +772,23 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
         return Path(git_root), branch, commit_sha
 
     def _require_workspace(self, workspace_id: str) -> WorkspaceRef:
-        workspace = self._workspaces.get(str(workspace_id))
-        if workspace is None:
+        return self._require_workspace_state(workspace_id).workspace
+
+    def _require_workspace_state(self, workspace_id: str) -> _WorkspaceState:
+        workspace_state = self._workspaces.get(str(workspace_id))
+        if workspace_state is None:
             raise ErrorCodeContractError(
                 ErrorCode.NOT_FOUND,
                 f"Workspace {workspace_id} has not been inspected.",
                 details={"workspace_id": str(workspace_id)},
             )
-        return workspace
+        return workspace_state
 
     def _open_git_repo(self, workspace: WorkspaceRef) -> tuple[Any | None, _RepoServiceIO]:
-        _any_git_error, git_repo_cls, _git_module = _load_git_backend()
         io = _RepoServiceIO()
-        if git_repo_cls is None:
+        if not workspace.commit_sha and not workspace.branch:
             return None, io
-        try:
-            repo = git_repo_cls(io=io, fnames=[], git_dname=workspace.root_path)
-        except FileNotFoundError:
-            return None, io
-        return repo, io
+        return _LocalGitRepo(workspace.root_path, io), io
 
     def _list_workspace_files(
         self,
@@ -720,6 +1037,195 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
 
         snippet = " ".join(lines[:MAX_SNIPPET_LINES])[:MAX_SNIPPET_CHARS]
         return snippet or None
+
+    def _collect_static_file_info(
+        self,
+        root: Path,
+        files: Sequence[Path],
+        workspace: WorkspaceRef | None = None,
+    ) -> tuple[dict[str, _StaticFileInfo], list[str]]:
+        infos: dict[str, _StaticFileInfo] = {}
+        warnings: list[str] = []
+        cache = self._static_info_cache_for(workspace)
+        for path in files:
+            rel_path = self._rel_path(root, path)
+            info = cache.get(rel_path)
+            if info is None:
+                info = self._build_static_file_info(root, path, warnings)
+                cache[rel_path] = info
+            infos[info.rel_path] = info
+        return infos, warnings
+
+    def _build_static_file_info(
+        self,
+        root: Path,
+        path: Path,
+        warnings: list[str],
+    ) -> _StaticFileInfo:
+        rel_path = self._rel_path(root, path)
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            warnings.append(self._warning(ErrorCode.REPO_INDEX_FAILED, f"{rel_path}: {exc}"))
+            text = ""
+
+        module_name = self._module_name_for_path(root, path)
+        is_package = path.name == "__init__.py"
+        imports: set[str] = set()
+        symbols: set[str] = set()
+        identifiers = list(dict.fromkeys(IDENT_PATTERN.findall(text)))
+
+        if path.suffix == ".py" and text:
+            try:
+                tree = ast.parse(text)
+            except SyntaxError as exc:
+                warnings.append(self._warning(ErrorCode.REPO_INDEX_FAILED, f"{rel_path}: {exc.msg}"))
+            else:
+                imports, symbols = self._extract_python_symbols_and_imports(
+                    tree,
+                    module_name,
+                    is_package,
+                )
+
+        return _StaticFileInfo(
+            rel_path=rel_path,
+            path=path,
+            module_name=module_name,
+            is_package=is_package,
+            imports=frozenset(imports),
+            symbols=frozenset(symbols),
+            identifiers=frozenset(identifiers[:256]),
+        )
+
+    def _module_name_for_path(self, root: Path, path: Path) -> str | None:
+        if path.suffix != ".py":
+            return None
+        parts = list(path.relative_to(root).with_suffix("").parts)
+        if not parts:
+            return None
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        if not parts:
+            return None
+        return ".".join(parts)
+
+    def _extract_python_symbols_and_imports(
+        self,
+        tree: ast.AST,
+        module_name: str | None,
+        is_package: bool,
+    ) -> tuple[set[str], set[str]]:
+        imports: set[str] = set()
+        symbols: set[str] = set()
+
+        for node in getattr(tree, "body", []):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                symbols.add(node.name)
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    imports.add(alias.name)
+                continue
+
+            if not isinstance(node, ast.ImportFrom):
+                continue
+
+            resolved_module = self._resolve_import_from_module(
+                module_name,
+                is_package,
+                node.module,
+                node.level,
+            )
+            if not resolved_module:
+                continue
+            imports.add(resolved_module)
+            for alias in node.names:
+                if alias.name != "*":
+                    imports.add(f"{resolved_module}.{alias.name}")
+
+        return imports, symbols
+
+    def _resolve_import_from_module(
+        self,
+        module_name: str | None,
+        is_package: bool,
+        imported_module: str | None,
+        level: int,
+    ) -> str | None:
+        if level <= 0:
+            return imported_module
+
+        if not module_name:
+            return imported_module
+
+        current_parts = module_name.split(".")
+        base_parts = current_parts if is_package else current_parts[:-1]
+        trim = max(level - 1, 0)
+        if trim > len(base_parts):
+            base_parts = []
+        elif trim:
+            base_parts = base_parts[:-trim]
+
+        imported_parts = imported_module.split(".") if imported_module else []
+        resolved_parts = [part for part in [*base_parts, *imported_parts] if part]
+        return ".".join(resolved_parts) or None
+
+    def _resolve_local_module_paths(
+        self,
+        module_name: str,
+        module_to_paths: dict[str, set[str]],
+    ) -> list[str]:
+        matches: list[str] = []
+        seen: set[str] = set()
+        parts = module_name.split(".")
+        for size in range(len(parts), 0, -1):
+            candidate = ".".join(parts[:size])
+            for rel_path in module_to_paths.get(candidate, ()):
+                if rel_path in seen:
+                    continue
+                matches.append(rel_path)
+                seen.add(rel_path)
+        return matches
+
+    def _imports_changed_module(
+        self,
+        imports: frozenset[str],
+        changed_modules: set[str],
+    ) -> bool:
+        for imported_module in imports:
+            for changed_module in changed_modules:
+                if imported_module == changed_module:
+                    return True
+                if imported_module.startswith(f"{changed_module}."):
+                    return True
+                if changed_module.startswith(f"{imported_module}."):
+                    return True
+        return False
+
+    def _static_info_cache_for(
+        self,
+        workspace: WorkspaceRef | None,
+    ) -> dict[str, _StaticFileInfo]:
+        if workspace is None:
+            return {}
+        state = self._workspaces.get(str(workspace.workspace_id))
+        if state is None:
+            return {}
+        return state.static_info_cache
+
+    def _can_reuse_workspace_cache(
+        self,
+        existing: WorkspaceRef,
+        updated: WorkspaceRef,
+    ) -> bool:
+        if existing.root_path != updated.root_path:
+            return False
+        if existing.branch != updated.branch:
+            return False
+        if existing.commit_sha != updated.commit_sha:
+            return False
+        return True
 
     def _dedupe_paths(self, paths: Sequence[Path]) -> list[Path]:
         seen: set[str] = set()

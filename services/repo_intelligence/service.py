@@ -27,7 +27,7 @@ class RepoIntelligenceService(ABC):
 
     @abstractmethod
     async def refresh_index(self, workspace: WorkspaceRef, changed_files: Sequence[str]) -> None:
-        """Refresh index state after file or branch changes."""
+        """Refresh repo-intelligence state after file or branch changes."""
 
     @abstractmethod
     async def summarize_files(self, workspace: WorkspaceRef, files: Sequence[str]) -> Sequence[FileSummary]:
@@ -43,4 +43,4 @@ class RepoIntelligenceService(ABC):
 
     @abstractmethod
     async def watch_workspace(self, workspace: WorkspaceRef) -> WatchSubscription:
-        """Create an incremental watch subscription for repo changes."""
+        """Return a watch descriptor for future repo-change subscriptions."""

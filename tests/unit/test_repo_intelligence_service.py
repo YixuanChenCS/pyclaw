@@ -5,10 +5,12 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from packages.shared_types import ErrorCode, ErrorCodeContractError, RepoContextRequest, Workspace
 from packages.shared_types.ids import new_run_id
 from services.repo_intelligence import RepoIntelligenceService
+from services.repo_intelligence import local as repo_intelligence_local
 from services.repo_intelligence.local import LocalRepoIntelligenceService
 
 
@@ -91,6 +93,23 @@ class TestLocalRepoIntelligenceService(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(context.exception.error_code, ErrorCode.WORKSPACE_NOT_FOUND)
 
+    async def test_inspect_workspace_rejects_workspace_symlink(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_root = Path(tmpdir)
+            real_root = tmp_root / "workspace"
+            real_root.mkdir()
+            symlink_root = tmp_root / "workspace-link"
+            try:
+                symlink_root.symlink_to(real_root, target_is_directory=True)
+            except (NotImplementedError, OSError):
+                self.skipTest("symlinks are unavailable in this environment")
+
+            service = LocalRepoIntelligenceService()
+            with self.assertRaises(ErrorCodeContractError) as context:
+                await service.inspect_workspace(Workspace(root_path=str(symlink_root)))
+
+            self.assertEqual(context.exception.error_code, ErrorCode.WORKSPACE_SYMLINK_ESCAPE)
+
     async def test_build_context_returns_repo_context_result(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -116,6 +135,33 @@ class TestLocalRepoIntelligenceService(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(result.file_summaries)
             self.assertEqual(result.file_summaries[0].path, "app.py")
             self.assertIsInstance(result.warnings, tuple)
+
+    async def test_build_context_rejects_symlink_target_outside_workspace(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_root = Path(tmpdir)
+            repo_root = tmp_root / "repo"
+            repo_root.mkdir()
+            outside_file = tmp_root / "outside.py"
+            outside_file.write_text("print('nope')\n", encoding="utf-8")
+            leak_link = repo_root / "leak.py"
+            try:
+                leak_link.symlink_to(outside_file)
+            except (NotImplementedError, OSError):
+                self.skipTest("symlinks are unavailable in this environment")
+
+            service = LocalRepoIntelligenceService()
+            workspace = await service.inspect_workspace(Workspace(root_path=str(repo_root)))
+
+            with self.assertRaises(ErrorCodeContractError) as context:
+                await service.build_context(
+                    RepoContextRequest(
+                        workspace_id=workspace.workspace_id,
+                        run_id=new_run_id(),
+                        target_paths=("leak.py",),
+                    )
+                )
+
+            self.assertEqual(context.exception.error_code, ErrorCode.WORKSPACE_SYMLINK_ESCAPE)
 
     async def test_summarize_files_handles_text_files(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -159,6 +205,137 @@ class TestLocalRepoIntelligenceService(unittest.IsolatedAsyncioTestCase):
             joined_warnings = "\n".join(result.warnings)
             self.assertIn(ErrorCode.WORKSPACE_BINARY_FILE.value, joined_warnings)
             self.assertIn(ErrorCode.WORKSPACE_FILE_TOO_LARGE.value, joined_warnings)
+
+    async def test_search_symbols_returns_matching_tags(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "main.py").write_text("def worker_service():\n    return 1\n", encoding="utf-8")
+            (root / "other.py").write_text("class Worker:\n    pass\n", encoding="utf-8")
+
+            service = LocalRepoIntelligenceService()
+            workspace = await service.inspect_workspace(Workspace(root_path=str(root)))
+
+            class FakeTag:
+                def __init__(self, name: str, kind: str, line: int):
+                    self.name = name
+                    self.kind = kind
+                    self.line = line
+
+            class FakeRepoMap:
+                def get_tags(self, _fname: str, rel_fname: str):
+                    if rel_fname == "main.py":
+                        return [FakeTag("worker_service", "function", 0)]
+                    if rel_fname == "other.py":
+                        return [FakeTag("Worker", "class", 0)]
+                    return []
+
+            with patch.object(service, "_new_repo_map", return_value=FakeRepoMap()):
+                matches = await service.search_symbols(workspace, "worker")
+
+            by_name = {match.name: match for match in matches}
+            self.assertEqual(set(by_name), {"worker_service", "Worker"})
+            self.assertEqual(by_name["worker_service"].path, "main.py")
+            self.assertEqual(by_name["worker_service"].line, 1)
+
+    async def test_analyze_impact_finds_importers_and_dependencies(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            pkg = root / "pkg"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("", encoding="utf-8")
+            (pkg / "helpers.py").write_text("def util():\n    return 1\n", encoding="utf-8")
+            (pkg / "api.py").write_text(
+                "from .helpers import util\n\nclass Service:\n    pass\n",
+                encoding="utf-8",
+            )
+            (root / "consumer.py").write_text(
+                "from pkg.api import Service\n\nvalue = Service\n",
+                encoding="utf-8",
+            )
+
+            service = LocalRepoIntelligenceService()
+            workspace = await service.inspect_workspace(Workspace(root_path=str(root)))
+            impact = await service.analyze_impact(workspace, ("pkg/api.py",))
+
+            self.assertEqual(impact.changed_paths, ("pkg/api.py",))
+            self.assertIn("pkg/helpers.py", impact.impacted_paths)
+            self.assertIn("consumer.py", impact.impacted_paths)
+            self.assertIn("pkg/api.py", impact.impacted_paths)
+
+    async def test_refresh_index_invalidates_changed_file_analysis_cache(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            pkg = root / "pkg"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("", encoding="utf-8")
+            (pkg / "api.py").write_text("class Service:\n    pass\n", encoding="utf-8")
+            consumer = root / "consumer.py"
+            consumer.write_text("value = 1\n", encoding="utf-8")
+
+            service = LocalRepoIntelligenceService()
+            workspace = await service.inspect_workspace(Workspace(root_path=str(root)))
+
+            initial = await service.analyze_impact(workspace, ("pkg/api.py",))
+            self.assertNotIn("consumer.py", initial.impacted_paths)
+
+            consumer.write_text("from pkg.api import Service\n\nvalue = Service\n", encoding="utf-8")
+            await service.refresh_index(workspace, ("consumer.py",))
+
+            refreshed = await service.analyze_impact(workspace, ("pkg/api.py",))
+            self.assertIn("consumer.py", refreshed.impacted_paths)
+
+    async def test_refresh_index_clears_analysis_cache_on_branch_switch(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._init_git_repo(root)
+            pkg = root / "pkg"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("", encoding="utf-8")
+            (pkg / "api.py").write_text("class Service:\n    pass\n", encoding="utf-8")
+            consumer = root / "consumer.py"
+            consumer.write_text("value = 1\n", encoding="utf-8")
+            self._commit_all(root, "main branch baseline")
+
+            service = LocalRepoIntelligenceService()
+            workspace = await service.inspect_workspace(Workspace(root_path=str(root)))
+
+            initial = await service.analyze_impact(workspace, ("pkg/api.py",))
+            self.assertNotIn("consumer.py", initial.impacted_paths)
+
+            subprocess.run(
+                ["git", "-C", str(root), "checkout", "-b", "feature/cache-reset"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            consumer.write_text("from pkg.api import Service\n\nvalue = Service\n", encoding="utf-8")
+            await service.refresh_index(workspace, ())
+
+            refreshed = await service.analyze_impact(workspace, ("pkg/api.py",))
+            self.assertIn("consumer.py", refreshed.impacted_paths)
+
+    async def test_watch_workspace_returns_descriptor_only(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+            (root / "README.md").write_text("# demo\n", encoding="utf-8")
+            (root / "ignored.txt").write_text("skip\n", encoding="utf-8")
+            src_dir = root / "src"
+            src_dir.mkdir()
+            (src_dir / "app.py").write_text("print('ok')\n", encoding="utf-8")
+
+            service = LocalRepoIntelligenceService()
+            workspace = await service.inspect_workspace(Workspace(root_path=str(root)))
+            subscription = await service.watch_workspace(workspace)
+            resolved_root = Path(workspace.root_path)
+
+            self.assertEqual(subscription.workspace_id, workspace.workspace_id)
+            self.assertTrue(subscription.subscription_id.startswith("watch_"))
+            self.assertIn(str(resolved_root / "README.md"), subscription.watched_paths)
+            self.assertIn(str(resolved_root / ".gitignore"), subscription.watched_paths)
+            self.assertIn(str(resolved_root / "src"), subscription.watched_paths)
+            if repo_intelligence_local._PathSpec is not None:
+                self.assertNotIn(str(resolved_root / "ignored.txt"), subscription.watched_paths)
 
     def test_existing_cli_imports_still_work(self):
         imported = importlib.import_module("apps.cli.app")
