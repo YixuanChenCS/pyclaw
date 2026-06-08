@@ -1,296 +1,416 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Mapping, Sequence
+from dataclasses import dataclass, field, fields, is_dataclass
+from datetime import datetime, timezone
+from enum import Enum
+import json
+from typing import Any, Mapping, Sequence, Union
 
-from .enums import (
-    ActionKind,
-    ApprovalMode,
-    ArtifactType,
-    DeploymentStatus,
-    EventType,
-    FailureCode,
-    HealthState,
-    RunMode,
-    RunStatus,
+from .enums import ArtifactType, EventType, RunStatus, TaskStatus
+from .errors import ContractSerializationError
+from .ids import (
+    ApprovalId,
+    ArtifactId,
+    EventId,
+    RunId,
+    SessionId,
+    TaskId,
+    WorkspaceId,
+    new_approval_id,
+    new_artifact_id,
+    new_event_id,
+    new_run_id,
+    new_session_id,
+    new_task_id,
+    new_workspace_id,
 )
 
+JSONValue = Union[
+    str,
+    int,
+    float,
+    bool,
+    None,
+    list["JSONValue"],
+    dict[str, "JSONValue"],
+]
 
-@dataclass(slots=True)
-class WorkspaceRef:
-    workspace_id: str
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _serialize_datetime(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    else:
+        value = value.astimezone(timezone.utc)
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def _to_json_value(value: Any) -> JSONValue:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, datetime):
+        return _serialize_datetime(value)
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, Mapping):
+        return {str(key): _to_json_value(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_to_json_value(item) for item in value]
+    if is_dataclass(value):
+        return {item.name: _to_json_value(getattr(value, item.name)) for item in fields(value)}
+    raise TypeError(f"Unsupported value for JSON serialization: {type(value)!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class SerializableModel:
+    def to_dict(self) -> dict[str, JSONValue]:
+        try:
+            return {
+                item.name: _to_json_value(getattr(self, item.name))
+                for item in fields(self)
+            }
+        except TypeError as exc:
+            raise ContractSerializationError(str(exc)) from exc
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), sort_keys=True)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Workspace(SerializableModel):
     root_path: str
+    workspace_id: WorkspaceId = field(default_factory=new_workspace_id)
     branch: str | None = None
     commit_sha: str | None = None
-    is_git_repo: bool | None = None
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
 
 
-@dataclass(slots=True)
-class ConstraintSet:
-    approval_mode: ApprovalMode = ApprovalMode.ON_WRITE
-    allow_shell: bool = True
-    allow_network: bool = False
-    allow_deploy: bool = False
-    max_runtime_seconds: int | None = None
-    max_output_bytes: int | None = None
-    test_command: str | None = None
-    deploy_target: str | None = None
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Session(SerializableModel):
+    workspace_id: WorkspaceId
+    session_id: SessionId = field(default_factory=new_session_id)
+    title: str | None = None
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
 
 
-@dataclass(slots=True)
-class RunContext:
-    session_id: str
-    user_id: str | None = None
-    branch: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
-class RunRequest:
-    run_id: str
-    workspace: WorkspaceRef
-    context: RunContext
-    mode: RunMode
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Run(SerializableModel):
+    workspace_id: WorkspaceId
+    session_id: SessionId
     prompt: str
-    targets: Sequence[str] = field(default_factory=tuple)
-    constraints: ConstraintSet = field(default_factory=ConstraintSet)
+    run_id: RunId = field(default_factory=new_run_id)
+    status: RunStatus = RunStatus.QUEUED
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
 
 
-@dataclass(slots=True)
-class RepoContextRequest:
-    run_id: str
-    workspace: WorkspaceRef
-    targets: Sequence[str] = field(default_factory=tuple)
-    prompt: str | None = None
-    include_repo_map: bool = True
-    include_symbols: bool = True
-    include_dependencies: bool = True
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Task(SerializableModel):
+    run_id: RunId
+    title: str
+    task_id: TaskId = field(default_factory=new_task_id)
+    status: TaskStatus = TaskStatus.PENDING
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
 
 
-@dataclass(slots=True)
-class FileSummary:
-    path: str
-    language: str | None = None
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Artifact(SerializableModel):
+    run_id: RunId
+    artifact_type: ArtifactType
+    artifact_id: ArtifactId = field(default_factory=new_artifact_id)
+    task_id: TaskId | None = None
+    label: str | None = None
+    uri: str | None = None
+    created_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RunRequest(SerializableModel):
+    workspace_id: WorkspaceId
+    session_id: SessionId
+    prompt: str
+    run_id: RunId | None = None
+    target_paths: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RunResult(SerializableModel):
+    run_id: RunId
+    status: RunStatus
     summary: str | None = None
-    token_estimate: int | None = None
+    artifacts: tuple[Artifact, ...] = ()
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    error_message: str | None = None
 
 
-@dataclass(slots=True)
-class SymbolMatch:
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FileSummary(SerializableModel):
+    path: str
+    summary: str | None = None
+    language: str | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SymbolMatch(SerializableModel):
     name: str
     kind: str
     path: str
     line: int | None = None
-    score: float | None = None
 
 
-@dataclass(slots=True)
-class ImpactAnalysis:
-    changed_files: Sequence[str] = field(default_factory=tuple)
-    dependent_files: Sequence[str] = field(default_factory=tuple)
-    symbols_at_risk: Sequence[str] = field(default_factory=tuple)
-    warnings: Sequence[str] = field(default_factory=tuple)
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ImpactAnalysis(SerializableModel):
+    changed_paths: tuple[str, ...] = ()
+    impacted_paths: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
 
 
-@dataclass(slots=True)
-class RepoContextResult:
-    workspace: WorkspaceRef
-    file_summaries: Sequence[FileSummary] = field(default_factory=tuple)
-    symbols: Sequence[SymbolMatch] = field(default_factory=tuple)
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RepoContextRequest(SerializableModel):
+    workspace_id: WorkspaceId
+    run_id: RunId
+    prompt: str | None = None
+    task_id: TaskId | None = None
+    target_paths: tuple[str, ...] = ()
+    max_files: int | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RepoContextResult(SerializableModel):
+    workspace_id: WorkspaceId
+    run_id: RunId
+    file_summaries: tuple[FileSummary, ...] = ()
     repo_map: str | None = None
-    dependency_hints: Sequence[str] = field(default_factory=tuple)
-    warnings: Sequence[str] = field(default_factory=tuple)
+    symbols: tuple[SymbolMatch, ...] = ()
+    dependency_hints: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+    created_at: datetime = field(default_factory=utc_now)
 
 
-@dataclass(slots=True)
-class AgentPlanStep:
-    step_id: str
-    title: str
-    status: str = "pending"
-    notes: str | None = None
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PatchProposal(SerializableModel):
+    run_id: RunId
+    artifact_id: ArtifactId = field(default_factory=new_artifact_id)
+    task_id: TaskId | None = None
+    summary: str | None = None
+    unified_diff: str = ""
+    target_paths: tuple[str, ...] = ()
+    created_at: datetime = field(default_factory=utc_now)
 
 
-@dataclass(slots=True)
-class AgentPlan:
-    run_id: str
-    steps: Sequence[AgentPlanStep] = field(default_factory=tuple)
-    rationale: str | None = None
-
-
-@dataclass(slots=True)
-class CommandRequest:
-    run_id: str
-    command_id: str
-    command: str
-    cwd: str
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CommandRequest(SerializableModel):
+    run_id: RunId
+    task_id: TaskId
+    argv: tuple[str, ...]
+    cwd: str | None = None
     timeout_seconds: int | None = None
-    capture_output: bool = True
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=utc_now)
 
 
-@dataclass(slots=True)
-class CommandResult:
-    run_id: str
-    command_id: str
-    exit_code: int | None = None
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CommandResult(SerializableModel):
+    run_id: RunId
+    task_id: TaskId
+    exit_code: int | None
     stdout: str = ""
     stderr: str = ""
-    duration_ms: int | None = None
-    failure_code: FailureCode | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
 
 
-@dataclass(slots=True)
-class PatchProposal:
-    run_id: str
-    patch_id: str
-    files: Sequence[str] = field(default_factory=tuple)
-    diff: str | None = None
-    summary: str | None = None
-    requires_approval: bool = False
-
-
-@dataclass(slots=True)
-class ArtifactRef:
-    artifact_id: str
-    artifact_type: ArtifactType
-    uri: str | None = None
-    run_id: str | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
-class ApprovalRequest:
-    approval_id: str
-    run_id: str
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ApprovalRequest(SerializableModel):
+    run_id: RunId
     reason: str
-    files: Sequence[str] = field(default_factory=tuple)
-    commands: Sequence[str] = field(default_factory=tuple)
+    approval_id: ApprovalId = field(default_factory=new_approval_id)
+    task_id: TaskId | None = None
+    patch_id: ArtifactId | None = None
+    command_argv: tuple[str, ...] = ()
+    created_at: datetime = field(default_factory=utc_now)
     expires_at: datetime | None = None
 
 
-@dataclass(slots=True)
-class ApprovalDecision:
-    approval_id: str
-    run_id: str
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ApprovalDecision(SerializableModel):
+    approval_id: ApprovalId
+    run_id: RunId
     approved: bool
-    reviewer_id: str | None = None
+    decided_at: datetime = field(default_factory=utc_now)
+    reviewer: str | None = None
     comment: str | None = None
 
 
-@dataclass(slots=True)
-class AgentAction:
-    run_id: str
-    kind: ActionKind
-    plan_step_id: str | None = None
-    command_request: CommandRequest | None = None
-    patch_proposal: PatchProposal | None = None
-    approval_request: ApprovalRequest | None = None
-    artifact_refs: Sequence[ArtifactRef] = field(default_factory=tuple)
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RunEvent(SerializableModel):
+    run_id: RunId
+    event_type: EventType
+    event_id: EventId = field(default_factory=new_event_id)
+    message: str | None = None
+    run_status: RunStatus | None = None
+    task_id: TaskId | None = None
+    task_status: TaskStatus | None = None
+    artifact_id: ArtifactId | None = None
+    approval_id: ApprovalId | None = None
+    payload: Mapping[str, JSONValue] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AgentPlanStep(SerializableModel):
+    task_id: TaskId
+    title: str
+    status: TaskStatus = TaskStatus.PENDING
     notes: str | None = None
 
 
-@dataclass(slots=True)
-class RunEvent:
-    event_id: str
-    run_id: str
-    event_type: EventType
-    status: RunStatus | None = None
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    payload: Mapping[str, Any] = field(default_factory=dict)
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AgentPlan(SerializableModel):
+    run_id: RunId
+    steps: tuple[AgentPlanStep, ...] = ()
+    created_at: datetime = field(default_factory=utc_now)
 
 
-@dataclass(slots=True)
-class RunResult:
-    run_id: str
-    status: RunStatus
-    summary: str | None = None
-    artifacts: Sequence[ArtifactRef] = field(default_factory=tuple)
-    duration_ms: int | None = None
-    tokens_in: int | None = None
-    tokens_out: int | None = None
-    failure_code: FailureCode | None = None
-    warnings: Sequence[str] = field(default_factory=tuple)
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AgentAction(SerializableModel):
+    run_id: RunId
+    task_id: TaskId | None = None
+    message: str | None = None
+    command_request: CommandRequest | None = None
+    patch_proposal: PatchProposal | None = None
+    approval_request: ApprovalRequest | None = None
+    created_at: datetime = field(default_factory=utc_now)
 
 
-@dataclass(slots=True)
-class DeploymentRequest:
-    deployment_id: str
-    run_id: str
-    workspace: WorkspaceRef
-    target: str
-    metadata: Mapping[str, Any] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
-class DeploymentResult:
-    deployment_id: str
-    run_id: str
-    status: DeploymentStatus
-    url: str | None = None
-    logs_uri: str | None = None
-    warnings: Sequence[str] = field(default_factory=tuple)
-
-
-@dataclass(slots=True)
-class HealthCheckResult:
-    service: str
-    state: HealthState
-    checked_at: datetime = field(default_factory=datetime.utcnow)
-    details: Mapping[str, Any] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
-class MetricPoint:
-    name: str
-    value: float
-    timestamp: datetime = field(default_factory=datetime.utcnow)
-    tags: Mapping[str, str] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
-class TraceSpan:
-    name: str
-    trace_id: str | None = None
-    parent_span_id: str | None = None
-    started_at: datetime = field(default_factory=datetime.utcnow)
-    attributes: Mapping[str, Any] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
-class FailureRecord:
-    code: FailureCode
-    message: str
-    run_id: str | None = None
-    event_id: str | None = None
-    details: Mapping[str, Any] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
-class WatchSubscription:
-    workspace_id: str
+@dataclass(frozen=True, slots=True, kw_only=True)
+class WatchSubscription(SerializableModel):
+    workspace_id: WorkspaceId
     subscription_id: str
-    watched_paths: Sequence[str] = field(default_factory=tuple)
+    watched_paths: tuple[str, ...] = ()
 
 
-@dataclass(slots=True)
-class LLMMessage:
+@dataclass(frozen=True, slots=True, kw_only=True)
+class LLMMessage(SerializableModel):
     role: str
     content: str
-    metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
-@dataclass(slots=True)
-class TokenUsage:
+@dataclass(frozen=True, slots=True, kw_only=True)
+class TokenUsage(SerializableModel):
     input_tokens: int = 0
     output_tokens: int = 0
-    cached_tokens: int = 0
 
 
-@dataclass(slots=True)
-class LLMResponse:
+@dataclass(frozen=True, slots=True, kw_only=True)
+class LLMResponse(SerializableModel):
     provider: str
     model: str
     content: str
     usage: TokenUsage = field(default_factory=TokenUsage)
     finish_reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DeploymentRequest(SerializableModel):
+    run_id: RunId
+    workspace_id: WorkspaceId
+    target: str
+    created_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DeploymentResult(SerializableModel):
+    run_id: RunId
+    status: str
+    url: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class HealthCheckResult(SerializableModel):
+    service: str
+    status: str
+    checked_at: datetime = field(default_factory=utc_now)
+    details: Mapping[str, JSONValue] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class MetricPoint(SerializableModel):
+    name: str
+    value: float
+    recorded_at: datetime = field(default_factory=utc_now)
+    tags: Mapping[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class TraceSpan(SerializableModel):
+    name: str
+    trace_id: str | None = None
+    parent_span_id: str | None = None
+    started_at: datetime = field(default_factory=utc_now)
+    attributes: Mapping[str, JSONValue] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FailureRecord(SerializableModel):
+    message: str
+    run_id: RunId | None = None
+    event_id: EventId | None = None
+    created_at: datetime = field(default_factory=utc_now)
+    details: Mapping[str, JSONValue] = field(default_factory=dict)
+
+
+ArtifactRef = Artifact
+WorkspaceRef = Workspace
+
+
+__all__ = [
+    "AgentAction",
+    "AgentPlan",
+    "AgentPlanStep",
+    "ApprovalDecision",
+    "ApprovalRequest",
+    "Artifact",
+    "ArtifactRef",
+    "CommandRequest",
+    "CommandResult",
+    "DeploymentRequest",
+    "DeploymentResult",
+    "FailureRecord",
+    "FileSummary",
+    "HealthCheckResult",
+    "ImpactAnalysis",
+    "JSONValue",
+    "LLMMessage",
+    "LLMResponse",
+    "MetricPoint",
+    "PatchProposal",
+    "RepoContextRequest",
+    "RepoContextResult",
+    "Run",
+    "RunEvent",
+    "RunRequest",
+    "RunResult",
+    "SerializableModel",
+    "Session",
+    "SymbolMatch",
+    "Task",
+    "TokenUsage",
+    "TraceSpan",
+    "WatchSubscription",
+    "Workspace",
+    "WorkspaceRef",
+    "utc_now",
+]

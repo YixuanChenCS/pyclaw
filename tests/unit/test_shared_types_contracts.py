@@ -1,0 +1,138 @@
+import importlib
+import json
+import unittest
+
+from packages.shared_types import (
+    Artifact,
+    ArtifactType,
+    ErrorCode,
+    EventType,
+    Run,
+    RunResult,
+    RunStatus,
+    Session,
+    Task,
+    TaskStatus,
+    Workspace,
+    build_run_event,
+    new_approval_id,
+    new_artifact_id,
+    new_event_id,
+    new_run_id,
+    new_session_id,
+    new_task_id,
+    new_workspace_id,
+    utc_now,
+)
+
+
+class TestSharedTypesContracts(unittest.TestCase):
+    def test_error_code_is_exported_with_stable_value(self):
+        self.assertEqual(ErrorCode.INVALID_REQUEST.value, "invalid_request")
+
+    def test_error_code_values_are_unique(self):
+        values = [error_code.value for error_code in ErrorCode]
+        self.assertEqual(len(values), len(set(values)))
+
+    def test_generated_ids_are_string_serializable(self):
+        generated_ids = [
+            new_workspace_id(),
+            new_session_id(),
+            new_run_id(),
+            new_task_id(),
+            new_artifact_id(),
+            new_approval_id(),
+            new_event_id(),
+        ]
+
+        expected_prefixes = [
+            "ws_",
+            "session_",
+            "run_",
+            "task_",
+            "artifact_",
+            "approval_",
+            "event_",
+        ]
+
+        for generated_id, expected_prefix in zip(generated_ids, expected_prefixes):
+            self.assertIsInstance(generated_id, str)
+            self.assertTrue(generated_id.startswith(expected_prefix))
+
+    def test_models_serialize_nested_contracts(self):
+        workspace = Workspace(root_path="/tmp/repo")
+        session = Session(workspace_id=workspace.workspace_id, title="Shared contracts")
+        started_at = utc_now()
+        finished_at = utc_now()
+
+        run = Run(
+            workspace_id=workspace.workspace_id,
+            session_id=session.session_id,
+            prompt="Implement Step 0 foundation",
+            status=RunStatus.RUNNING,
+            started_at=started_at,
+        )
+        task = Task(
+            run_id=run.run_id,
+            title="Define shared contracts",
+            status=TaskStatus.SUCCEEDED,
+            started_at=started_at,
+            finished_at=finished_at,
+        )
+        artifact = Artifact(
+            run_id=run.run_id,
+            task_id=task.task_id,
+            artifact_type=ArtifactType.LOG,
+            label="unit test output",
+        )
+        result = RunResult(
+            run_id=run.run_id,
+            status=RunStatus.SUCCEEDED,
+            summary="Contracts created",
+            artifacts=(artifact,),
+            started_at=started_at,
+            finished_at=finished_at,
+        )
+
+        payload = result.to_dict()
+        self.assertEqual(payload["status"], "succeeded")
+        self.assertEqual(payload["artifacts"][0]["artifact_type"], "log")
+        self.assertTrue(payload["artifacts"][0]["artifact_id"].startswith("artifact_"))
+        self.assertTrue(payload["finished_at"].endswith("Z"))
+
+        event = build_run_event(
+            run.run_id,
+            EventType.COMMAND_COMPLETED,
+            task_id=task.task_id,
+            task_status=TaskStatus.SUCCEEDED,
+            artifact_id=artifact.artifact_id,
+            payload={"argv": ["pytest", "-q"]},
+        )
+        event_payload = event.to_dict()
+        self.assertEqual(event_payload["event_type"], "command.completed")
+        self.assertEqual(event_payload["task_status"], "succeeded")
+        self.assertEqual(event_payload["payload"]["argv"], ["pytest", "-q"])
+
+        round_tripped = json.loads(event.to_json())
+        self.assertEqual(round_tripped["run_id"], str(run.run_id))
+
+    def test_placeholder_modules_still_import(self):
+        modules = [
+            "apps.api.app",
+            "apps.cli.app",
+            "apps.dashboard.app",
+            "packages.provider_adapters.llm",
+            "packages.provider_adapters.tools",
+            "services.agent_core.service",
+            "services.execution_runtime.service",
+            "services.ops_observability.service",
+            "services.repo_intelligence.service",
+        ]
+
+        for module_name in modules:
+            imported = importlib.import_module(module_name)
+            self.assertIsNotNone(imported)
+
+
+if __name__ == "__main__":
+    unittest.main()
