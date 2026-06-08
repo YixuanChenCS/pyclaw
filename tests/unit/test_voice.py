@@ -7,6 +7,11 @@ import pytest
 
 from pyclaw.voice import SoundDeviceError, Voice
 
+pytestmark = pytest.mark.skipif(
+    os.environ.get("CI") == "true",
+    reason="voice tests require a local audio input device",
+)
+
 
 # Mock the entire sounddevice module
 @pytest.fixture
