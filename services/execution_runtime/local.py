@@ -16,6 +16,7 @@ from packages.shared_types import (
     ErrorCodeContractError,
     EventType,
     InvalidRunStateError,
+    LockLease,
     PatchProposal,
     RepoStore,
     Run,
@@ -25,6 +26,7 @@ from packages.shared_types import (
     RunResult,
     RunStatus,
     Workspace,
+    WorkspaceLockManager,
     build_run_event,
     build_run_status_event,
     utc_now,
@@ -45,6 +47,7 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
         *,
         repository: SQLiteExecutionRuntimeRepository | None = None,
         repo_store: RepoStore | None = None,
+        workspace_lock_manager: WorkspaceLockManager | None = None,
         db_path: str | Path | None = None,
         stream_poll_interval: float = 0.05,
     ) -> None:
@@ -53,9 +56,13 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
             repository = SQLiteExecutionRuntimeRepository(runtime_db_path)
         self._repository = repository
         self._repo_store = repo_store
+        self._workspace_lock_manager = workspace_lock_manager
         self._stream_poll_interval = stream_poll_interval
         self._startup_lock = asyncio.Lock()
         self._started = False
+        self._active_command_tasks: dict[str, asyncio.Task[CommandResult]] = {}
+        self._active_execution_tasks: dict[str, asyncio.Task[CommandResult]] = {}
+        self._workspace_leases: dict[str, LockLease] = {}
 
     @property
     def repository(self) -> SQLiteExecutionRuntimeRepository:
@@ -79,7 +86,51 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
         return str(run.run_id)
 
     async def cancel_run(self, run_id: str, reason: str | None = None) -> None:
-        raise NotImplementedError("Phase 1 does not implement cancellation.")
+        await self._ensure_started()
+        typed_run_id = RunId(run_id)
+        run = await self._repository.get_run(typed_run_id)
+        if run is None:
+            raise EntityNotFoundError("run", run_id)
+
+        if run.status == RunStatus.QUEUED:
+            await self._repository.update_run_status(
+                run.run_id,
+                RunStatus.CANCELLED,
+                event_type=EventType.RUN_CANCELLED,
+                message=reason,
+                payload={"requested_reason": reason} if reason else None,
+            )
+            await self._release_workspace_lock(run_id)
+            return
+
+        if run.status in TERMINAL_RUN_STATUSES:
+            raise InvalidRunStateError(
+                f"Cannot cancel terminal run {run.run_id} in status {run.status.value}"
+            )
+
+        if run.status not in {RunStatus.RUNNING, RunStatus.WAITING_FOR_APPROVAL, RunStatus.CANCELLING}:
+            raise InvalidRunStateError(
+                f"Cannot cancel run {run.run_id} in status {run.status.value}"
+            )
+
+        if run.status != RunStatus.CANCELLING:
+            await self._repository.update_run_status(
+                run.run_id,
+                RunStatus.CANCELLING,
+                message=reason or "Cancellation requested.",
+                payload={"requested_reason": reason} if reason else None,
+            )
+
+        active_task = self._active_command_tasks.get(run_id)
+        execution_task = self._active_execution_tasks.get(run_id)
+        if active_task is not None:
+            active_task.cancel()
+            await active_task
+        if execution_task is not None:
+            await execution_task
+
+        await self._finalize_run_cancellation(run_id, reason=reason)
+        await self._release_workspace_lock(run_id)
 
     async def stream_events(self, run_id: str) -> AsyncIterator[RunEvent]:
         await self._ensure_started()
@@ -117,6 +168,9 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
             raise InvalidRunStateError(
                 f"Cannot execute command for run {run.run_id} in status {run.status.value}"
             )
+        run_id = str(request.run_id)
+        if run_id in self._active_command_tasks or run_id in self._active_execution_tasks:
+            raise InvalidRunStateError(f"Run {run.run_id} already has an active command.")
 
         workspace = await self._get_workspace(run)
         executor = LocalCommandExecutor(workspace.root_path)
@@ -135,8 +189,21 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
                 },
             ),
         )
-        result = await executor.execute(request)
+        current_task = asyncio.current_task()
+        if current_task is None:
+            raise RuntimeError("execute_command must run inside an asyncio task")
 
+        self._active_execution_tasks[run_id] = current_task
+        command_task = asyncio.create_task(executor.execute(request))
+        self._active_command_tasks[run_id] = command_task
+        try:
+            result = await command_task
+        finally:
+            self._active_command_tasks.pop(run_id, None)
+            self._active_execution_tasks.pop(run_id, None)
+
+        latest_run = await self._repository.get_run(run.run_id)
+        run_status = latest_run.status if latest_run is not None else run.status
         event_type = EventType.COMMAND_COMPLETED
         if result.cancelled:
             event_type = EventType.COMMAND_CANCELLED
@@ -151,7 +218,7 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
                 run_id=run.run_id,
                 event_type=event_type,
                 task_id=request.task_id,
-                run_status=run.status,
+                run_status=run_status,
                 payload={
                     "exit_code": result.exit_code,
                     "timed_out": result.timed_out,
@@ -162,6 +229,10 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
                 },
             ),
         )
+
+        if result.cancelled:
+            await self._finalize_run_cancellation(str(run.run_id), reason="Active command cancelled.")
+            await self._release_workspace_lock(str(run.run_id))
         return result
 
     async def apply_patch(self, run_id: str, proposal: PatchProposal) -> ArtifactRef:
@@ -204,6 +275,37 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
                 details={"workspace_id": str(run.workspace_id)},
             )
         return workspace
+
+    async def _finalize_run_cancellation(self, run_id: str, *, reason: str | None = None) -> None:
+        run = await self._repository.get_run(run_id)
+        if run is None:
+            raise EntityNotFoundError("run", run_id)
+        if run.status != RunStatus.CANCELLING:
+            return
+
+        try:
+            await self._repository.update_run_status(
+                run.run_id,
+                RunStatus.CANCELLED,
+                event_type=EventType.RUN_CANCELLED,
+                message=reason or "Run cancelled.",
+                payload={"requested_reason": reason} if reason else None,
+            )
+        except InvalidRunStateError:
+            latest_run = await self._repository.get_run(run_id)
+            if latest_run is None:
+                raise EntityNotFoundError("run", run_id)
+            if latest_run.status != RunStatus.CANCELLED:
+                raise
+
+    async def _release_workspace_lock(self, run_id: str) -> None:
+        if self._workspace_lock_manager is None:
+            return
+
+        lease = self._workspace_leases.pop(run_id, None)
+        if lease is None:
+            return
+        await self._workspace_lock_manager.release(lease)
 
 
 __all__ = ["LocalExecutionRuntimeService"]

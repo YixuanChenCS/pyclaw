@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 import sqlite3
+import sys
 import tempfile
 import unittest
 
@@ -323,6 +324,106 @@ class TestLocalExecutionRuntimeService(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(run)
             self.assertEqual(run.status, RunStatus.RUNNING)
             self.assertIsNone(run.finished_at)
+
+    async def test_cancel_queued_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            service, repository = self._make_runtime(Path(tmpdir))
+
+            run_id = await service.enqueue_run(self._make_request())
+            await service.cancel_run(run_id, reason="user requested")
+
+            run = await repository.get_run(run_id)
+            self.assertIsNotNone(run)
+            self.assertEqual(run.status, RunStatus.CANCELLED)
+            events = await repository.list_events(run_id)
+            self.assertEqual(events[-1].event_type, EventType.RUN_CANCELLED)
+
+    async def test_cancel_running_run_with_no_active_command(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            service, repository = self._make_runtime(Path(tmpdir))
+
+            run_id = await service.enqueue_run(self._make_request())
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            await service.cancel_run(run_id, reason="stop now")
+
+            run = await repository.get_run(run_id)
+            self.assertIsNotNone(run)
+            self.assertEqual(run.status, RunStatus.CANCELLED)
+            events = await repository.list_events(run_id)
+            self.assertEqual(events[-2].event_type, EventType.RUN_STATUS_CHANGED)
+            self.assertEqual(events[-2].run_status, RunStatus.CANCELLING)
+            self.assertEqual(events[-1].event_type, EventType.RUN_CANCELLED)
+
+    async def test_cancel_running_run_while_command_is_active(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            command_task = asyncio.create_task(
+                service.execute_command(
+                    self._make_command_request(
+                        run_id,
+                        argv=(sys.executable, "-c", "import time; time.sleep(5)"),
+                    )
+                )
+            )
+
+            for _ in range(100):
+                events = await repository.list_events(run_id)
+                if any(event.event_type == EventType.COMMAND_STARTED for event in events):
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                self.fail("command.started was not persisted before cancellation")
+
+            await service.cancel_run(run_id, reason="interrupt active command")
+            result = await command_task
+
+            self.assertTrue(result.cancelled)
+            self.assertEqual(result.termination_reason, "cancelled")
+            run = await repository.get_run(run_id)
+            self.assertIsNotNone(run)
+            self.assertEqual(run.status, RunStatus.CANCELLED)
+
+            events = await repository.list_events(run_id)
+            event_types = [event.event_type for event in events]
+            self.assertIn(EventType.RUN_STATUS_CHANGED, event_types)
+            self.assertIn(EventType.COMMAND_CANCELLED, event_types)
+            self.assertEqual(events[-1].event_type, EventType.RUN_CANCELLED)
+
+    async def test_terminal_run_cannot_be_cancelled(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            service, repository = self._make_runtime(Path(tmpdir))
+
+            run_id = await service.enqueue_run(self._make_request())
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            await repository.update_run_status(run_id, RunStatus.SUCCEEDED)
+
+            with self.assertRaises(InvalidRunStateError):
+                await service.cancel_run(run_id)
+
+    async def test_stream_events_replays_cancellation_events(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            service, _repository = self._make_runtime(Path(tmpdir))
+
+            run_id = await service.enqueue_run(self._make_request())
+            await service.cancel_run(run_id, reason="replay cancel")
+
+            stream = service.stream_events(run_id)
+            events = await self._collect_events(stream, 3)
+            self.assertEqual(
+                [event.event_type for event in events],
+                [
+                    EventType.RUN_CREATED,
+                    EventType.RUN_QUEUED,
+                    EventType.RUN_CANCELLED,
+                ],
+            )
 
 
 if __name__ == "__main__":
