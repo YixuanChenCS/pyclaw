@@ -8,11 +8,13 @@ import tempfile
 import unittest
 
 from packages.shared_types import (
+    ArtifactType,
     ErrorCode,
     ErrorCodeContractError,
     EventType,
     InvalidRunStateError,
     CommandRequest,
+    PatchProposal,
     RunRequest,
     RunStatus,
     Session,
@@ -59,6 +61,22 @@ class TestLocalExecutionRuntimeService(unittest.IsolatedAsyncioTestCase):
             task_id="task_command",
             argv=argv,
             timeout_seconds=timeout_seconds,
+        )
+
+    def _make_patch_proposal(
+        self,
+        run_id: str,
+        *,
+        unified_diff: str,
+        target_paths: tuple[str, ...] = (),
+        summary: str | None = "Apply patch",
+    ) -> PatchProposal:
+        return PatchProposal(
+            run_id=run_id,
+            task_id="task_patch",
+            summary=summary,
+            unified_diff=unified_diff,
+            target_paths=target_paths,
         )
 
     async def _collect_events(self, stream, count: int):
@@ -424,6 +442,278 @@ class TestLocalExecutionRuntimeService(unittest.IsolatedAsyncioTestCase):
                     EventType.RUN_CANCELLED,
                 ],
             )
+
+    async def test_apply_patch_modifies_file_in_workspace(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+            file_path = Path(tmpdir) / "app.txt"
+            file_path.write_text("before\n", encoding="utf-8")
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            artifact = await service.apply_patch(
+                run_id,
+                self._make_patch_proposal(
+                    run_id,
+                    unified_diff="--- a/app.txt\n+++ b/app.txt\n@@ -1 +1 @@\n-before\n+after\n",
+                    target_paths=("app.txt",),
+                ),
+            )
+
+            self.assertEqual(file_path.read_text(encoding="utf-8"), "after\n")
+            self.assertEqual(artifact.artifact_type, ArtifactType.PATCH)
+            artifacts = await repository.list_artifacts(run_id)
+            self.assertEqual(len(artifacts), 1)
+
+    async def test_apply_patch_rejects_path_escape_with_dotdot(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, _repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+
+            with self.assertRaises(ErrorCodeContractError) as context:
+                await service.apply_patch(
+                    run_id,
+                    self._make_patch_proposal(
+                        run_id,
+                        unified_diff="--- a/../escape.txt\n+++ b/../escape.txt\n@@ -0,0 +1 @@\n+bad\n",
+                        target_paths=("../escape.txt",),
+                    ),
+                )
+
+            self.assertEqual(context.exception.error_code, ErrorCode.AGENT_WRITE_OUTSIDE_WORKSPACE)
+
+    async def test_apply_patch_rejects_absolute_path_outside_workspace(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            outside_file = Path(tmpdir).parent / "outside-patch.txt"
+            service, _repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+
+            with self.assertRaises(ErrorCodeContractError) as context:
+                await service.apply_patch(
+                    run_id,
+                    self._make_patch_proposal(
+                        run_id,
+                        unified_diff=(
+                            f"--- {outside_file}\n+++ {outside_file}\n@@ -0,0 +1 @@\n+bad\n"
+                        ),
+                        target_paths=(str(outside_file),),
+                    ),
+                )
+
+            self.assertEqual(context.exception.error_code, ErrorCode.AGENT_WRITE_OUTSIDE_WORKSPACE)
+
+    async def test_apply_patch_detects_conflict_when_file_drifted(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, _repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+            file_path = Path(tmpdir) / "app.txt"
+            file_path.write_text("current\n", encoding="utf-8")
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            with self.assertRaises(ErrorCodeContractError) as context:
+                await service.apply_patch(
+                    run_id,
+                    self._make_patch_proposal(
+                        run_id,
+                        unified_diff="--- a/app.txt\n+++ b/app.txt\n@@ -1 +1 @@\n-before\n+after\n",
+                        target_paths=("app.txt",),
+                    ),
+                )
+
+            self.assertEqual(context.exception.error_code, ErrorCode.PATCH_CONFLICT)
+            self.assertEqual(file_path.read_text(encoding="utf-8"), "current\n")
+
+    async def test_apply_patch_persists_patch_artifact(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+            file_path = Path(tmpdir) / "app.txt"
+            file_path.write_text("before\n", encoding="utf-8")
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            artifact = await service.apply_patch(
+                run_id,
+                self._make_patch_proposal(
+                    run_id,
+                    unified_diff="--- a/app.txt\n+++ b/app.txt\n@@ -1 +1 @@\n-before\n+after\n",
+                    target_paths=("app.txt",),
+                    summary="Rename contents",
+                ),
+            )
+
+            artifacts = await repository.list_artifacts(run_id)
+            self.assertEqual(len(artifacts), 1)
+            self.assertEqual(artifacts[0].artifact_id, artifact.artifact_id)
+            self.assertEqual(artifacts[0].label, "Rename contents")
+            self.assertEqual(artifacts[0].uri, "app.txt")
+
+    async def test_apply_patch_emits_replayable_patch_event(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, _repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+            file_path = Path(tmpdir) / "app.txt"
+            file_path.write_text("before\n", encoding="utf-8")
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            await service.apply_patch(
+                run_id,
+                self._make_patch_proposal(
+                    run_id,
+                    unified_diff="--- a/app.txt\n+++ b/app.txt\n@@ -1 +1 @@\n-before\n+after\n",
+                    target_paths=("app.txt",),
+                ),
+            )
+
+            stream = service.stream_events(run_id)
+            events = await self._collect_events(stream, 5)
+            self.assertEqual(
+                [event.event_type for event in events],
+                [
+                    EventType.RUN_CREATED,
+                    EventType.RUN_QUEUED,
+                    EventType.RUN_STARTED,
+                    EventType.PATCH_APPLIED,
+                    EventType.ARTIFACT_CREATED,
+                ],
+            )
+
+    async def test_apply_patch_does_not_finalize_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+            file_path = Path(tmpdir) / "app.txt"
+            file_path.write_text("before\n", encoding="utf-8")
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            await service.apply_patch(
+                run_id,
+                self._make_patch_proposal(
+                    run_id,
+                    unified_diff="--- a/app.txt\n+++ b/app.txt\n@@ -1 +1 @@\n-before\n+after\n",
+                    target_paths=("app.txt",),
+                ),
+            )
+
+            run = await repository.get_run(run_id)
+            self.assertIsNotNone(run)
+            self.assertEqual(run.status, RunStatus.RUNNING)
+            self.assertIsNone(run.finished_at)
+
+    async def test_apply_patch_creates_new_file_from_dev_null_diff(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, _repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            await service.apply_patch(
+                run_id,
+                self._make_patch_proposal(
+                    run_id,
+                    unified_diff="--- /dev/null\n+++ b/new_file.txt\n@@ -0,0 +1 @@\n+created\n",
+                    target_paths=("new_file.txt",),
+                ),
+            )
+
+            self.assertEqual((Path(tmpdir) / "new_file.txt").read_text(encoding="utf-8"), "created\n")
+
+    async def test_apply_patch_handles_multiple_hunks(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, _repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+            file_path = Path(tmpdir) / "app.txt"
+            file_path.write_text("one\nkeep\nthree\nstay\n", encoding="utf-8")
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            await service.apply_patch(
+                run_id,
+                self._make_patch_proposal(
+                    run_id,
+                    unified_diff=(
+                        "--- a/app.txt\n"
+                        "+++ b/app.txt\n"
+                        "@@ -1,2 +1,2 @@\n"
+                        "-one\n"
+                        "+ONE\n"
+                        " keep\n"
+                        "@@ -3,2 +3,2 @@\n"
+                        "-three\n"
+                        "+THREE\n"
+                        " stay\n"
+                    ),
+                    target_paths=("app.txt",),
+                ),
+            )
+
+            self.assertEqual(file_path.read_text(encoding="utf-8"), "ONE\nkeep\nTHREE\nstay\n")
+
+    async def test_apply_patch_preserves_no_newline_markers(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, _repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+            file_path = Path(tmpdir) / "app.txt"
+            file_path.write_text("before", encoding="utf-8")
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            await service.apply_patch(
+                run_id,
+                self._make_patch_proposal(
+                    run_id,
+                    unified_diff=(
+                        "--- a/app.txt\n"
+                        "+++ b/app.txt\n"
+                        "@@ -1 +1 @@\n"
+                        "-before\n"
+                        "\\ No newline at end of file\n"
+                        "+after\n"
+                        "\\ No newline at end of file\n"
+                    ),
+                    target_paths=("app.txt",),
+                ),
+            )
+
+            self.assertEqual(file_path.read_text(encoding="utf-8"), "after")
 
 
 if __name__ == "__main__":

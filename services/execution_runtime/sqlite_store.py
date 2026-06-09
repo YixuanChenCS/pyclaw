@@ -10,7 +10,9 @@ from typing import Iterator, Mapping, Sequence
 
 from packages.shared_types import (
     ApprovalId,
+    Artifact,
     ArtifactId,
+    ArtifactType,
     EntityNotFoundError,
     EventId,
     EventType,
@@ -123,6 +125,12 @@ class SQLiteExecutionRuntimeRepository:
         now: datetime | None = None,
     ) -> tuple[Run, ...]:
         return await asyncio.to_thread(self._recover_stale_runs_sync, now or utc_now())
+
+    async def create_artifact(self, artifact: Artifact) -> None:
+        await asyncio.to_thread(self._create_artifact_sync, artifact)
+
+    async def list_artifacts(self, run_id: RunId | str) -> tuple[Artifact, ...]:
+        return await asyncio.to_thread(self._list_artifacts_sync, RunId(str(run_id)))
 
     def _initialize(self) -> None:
         connection = self._connect()
@@ -428,6 +436,41 @@ class SQLiteExecutionRuntimeRepository:
                 recovered_runs.append(recovered)
         return tuple(recovered_runs)
 
+    def _create_artifact_sync(self, artifact: Artifact) -> None:
+        with self._transaction("IMMEDIATE") as connection:
+            connection.execute(
+                """
+                INSERT INTO artifacts (
+                    artifact_id, run_id, task_id, artifact_type, label, uri, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(artifact.artifact_id),
+                    str(artifact.run_id),
+                    str(artifact.task_id) if artifact.task_id is not None else None,
+                    artifact.artifact_type.value,
+                    artifact.label,
+                    artifact.uri,
+                    serialize_datetime(artifact.created_at),
+                ),
+            )
+
+    def _list_artifacts_sync(self, run_id: RunId) -> tuple[Artifact, ...]:
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                """
+                SELECT * FROM artifacts
+                WHERE run_id = ?
+                ORDER BY created_at ASC, artifact_id ASC
+                """,
+                (str(run_id),),
+            ).fetchall()
+        finally:
+            connection.close()
+        return tuple(self._artifact_from_row(row) for row in rows)
+
     def _insert_run(self, connection: sqlite3.Connection, run: Run) -> None:
         connection.execute(
             """
@@ -558,6 +601,17 @@ class SQLiteExecutionRuntimeRepository:
             artifact_id=ArtifactId(row["artifact_id"]) if row["artifact_id"] else None,
             approval_id=ApprovalId(row["approval_id"]) if row["approval_id"] else None,
             payload=json_loads(row["payload_json"]),
+            created_at=parse_datetime(row["created_at"]) or utc_now(),
+        )
+
+    def _artifact_from_row(self, row: sqlite3.Row) -> Artifact:
+        return Artifact(
+            artifact_id=ArtifactId(row["artifact_id"]),
+            run_id=RunId(row["run_id"]),
+            task_id=TaskId(row["task_id"]) if row["task_id"] else None,
+            artifact_type=ArtifactType(row["artifact_type"]),
+            label=row["label"],
+            uri=row["uri"],
             created_at=parse_datetime(row["created_at"]) or utc_now(),
         )
 

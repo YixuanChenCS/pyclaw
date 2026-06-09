@@ -6,6 +6,8 @@ from typing import AsyncIterator, Sequence
 
 from packages.shared_types import (
     ApprovalRequest,
+    Artifact,
+    ArtifactType,
     ArtifactRef,
     CommandRequest,
     CommandResult,
@@ -34,6 +36,7 @@ from packages.shared_types import (
 
 from .command import LocalCommandExecutor
 from .events import validate_next_event_sequence
+from .patch import LocalPatchApplier
 from .service import ExecutionRuntimeService
 from .sqlite_store import SQLiteExecutionRuntimeRepository
 from .state_machine import TERMINAL_RUN_STATUSES
@@ -236,7 +239,100 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
         return result
 
     async def apply_patch(self, run_id: str, proposal: PatchProposal) -> ArtifactRef:
-        raise NotImplementedError("Phase 1 does not implement patch application.")
+        await self._ensure_started()
+        if str(proposal.run_id) != run_id:
+            raise ErrorCodeContractError(
+                ErrorCode.INVALID_REQUEST,
+                "apply_patch run_id must match proposal.run_id.",
+                details={"run_id": run_id, "proposal_run_id": str(proposal.run_id)},
+            )
+
+        run = await self._repository.get_run(proposal.run_id)
+        if run is None:
+            raise EntityNotFoundError("run", str(proposal.run_id))
+        if run.status != RunStatus.RUNNING:
+            raise InvalidRunStateError(
+                f"Cannot apply patch for run {run.run_id} in status {run.status.value}"
+            )
+
+        workspace = await self._get_workspace(run)
+        applier = LocalPatchApplier(workspace.root_path)
+        try:
+            changed_paths = applier.apply(proposal)
+        except ErrorCodeContractError as exc:
+            await self._repository.append_event_with_sequence(
+                run.run_id,
+                build_run_event(
+                    run_id=run.run_id,
+                    event_type=EventType.AGENT_MESSAGE,
+                    task_id=proposal.task_id,
+                    run_status=run.status,
+                    message=str(exc),
+                    payload={
+                        "kind": "patch.failed",
+                        "error_code": exc.error_code.value,
+                    },
+                ),
+            )
+            raise
+        except Exception as exc:
+            await self._repository.append_event_with_sequence(
+                run.run_id,
+                build_run_event(
+                    run_id=run.run_id,
+                    event_type=EventType.AGENT_MESSAGE,
+                    task_id=proposal.task_id,
+                    run_status=run.status,
+                    message=str(exc),
+                    payload={
+                        "kind": "patch.failed",
+                        "error_code": ErrorCode.PATCH_APPLY_FAILED.value,
+                    },
+                ),
+            )
+            raise ErrorCodeContractError(
+                ErrorCode.PATCH_APPLY_FAILED,
+                f"Patch application failed: {exc}",
+            ) from exc
+
+        artifact = Artifact(
+            artifact_id=proposal.artifact_id,
+            run_id=run.run_id,
+            task_id=proposal.task_id,
+            artifact_type=ArtifactType.PATCH,
+            label=proposal.summary or "Patch applied",
+            uri=",".join(changed_paths) if changed_paths else None,
+        )
+        await self._repository.create_artifact(artifact)
+        await self._repository.append_event_with_sequence(
+            run.run_id,
+            build_run_event(
+                run_id=run.run_id,
+                event_type=EventType.PATCH_APPLIED,
+                task_id=proposal.task_id,
+                artifact_id=artifact.artifact_id,
+                run_status=run.status,
+                payload={
+                    "artifact_id": str(artifact.artifact_id),
+                    "target_paths": list(changed_paths),
+                },
+            ),
+        )
+        await self._repository.append_event_with_sequence(
+            run.run_id,
+            build_run_event(
+                run_id=run.run_id,
+                event_type=EventType.ARTIFACT_CREATED,
+                task_id=proposal.task_id,
+                artifact_id=artifact.artifact_id,
+                run_status=run.status,
+                payload={
+                    "artifact_type": artifact.artifact_type.value,
+                    "uri": artifact.uri,
+                },
+            ),
+        )
+        return artifact
 
     async def request_approval(self, run_id: str, request: ApprovalRequest) -> str:
         raise NotImplementedError("Phase 1 does not implement approval checkpoints.")
