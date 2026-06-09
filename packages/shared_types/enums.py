@@ -34,6 +34,8 @@ class EventType(str, Enum):
     COMMAND_STARTED = "command.started"
     COMMAND_COMPLETED = "command.completed"
     COMMAND_FAILED = "command.failed"
+    COMMAND_TIMEOUT = "command.timeout"
+    COMMAND_CANCELLED = "command.cancelled"
     PATCH_PROPOSED = "patch.proposed"
     PATCH_APPLIED = "patch.applied"
     APPROVAL_REQUESTED = "approval.requested"

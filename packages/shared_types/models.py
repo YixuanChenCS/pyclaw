@@ -219,6 +219,7 @@ class CommandRequest(SerializableModel):
     task_id: TaskId
     argv: tuple[str, ...]
     cwd: str | None = None
+    env: Mapping[str, str] | None = None
     timeout_seconds: int | None = None
     created_at: datetime = field(default_factory=utc_now)
 
@@ -230,6 +231,11 @@ class CommandResult(SerializableModel):
     exit_code: int | None
     stdout: str = ""
     stderr: str = ""
+    timed_out: bool = False
+    cancelled: bool = False
+    stdout_truncated: bool = False
+    stderr_truncated: bool = False
+    termination_reason: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
 

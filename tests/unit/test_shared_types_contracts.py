@@ -5,6 +5,8 @@ import unittest
 from packages.shared_types import (
     Artifact,
     ArtifactType,
+    CommandRequest,
+    CommandResult,
     ErrorCode,
     EventType,
     Run,
@@ -89,6 +91,28 @@ class TestSharedTypesContracts(unittest.TestCase):
             artifact_type=ArtifactType.LOG,
             label="unit test output",
         )
+        command_request = CommandRequest(
+            run_id=run.run_id,
+            task_id=task.task_id,
+            argv=("pytest", "-q"),
+            cwd="/tmp/repo",
+            env={"PYTHONPATH": "/tmp/repo"},
+            timeout_seconds=30,
+        )
+        command_result = CommandResult(
+            run_id=run.run_id,
+            task_id=task.task_id,
+            exit_code=None,
+            stdout="partial stdout",
+            stderr="partial stderr",
+            timed_out=True,
+            cancelled=False,
+            stdout_truncated=True,
+            stderr_truncated=False,
+            termination_reason="timeout",
+            started_at=started_at,
+            finished_at=finished_at,
+        )
         result = RunResult(
             run_id=run.run_id,
             status=RunStatus.SUCCEEDED,
@@ -106,10 +130,14 @@ class TestSharedTypesContracts(unittest.TestCase):
         self.assertEqual(run.to_dict()["attempt"], 2)
         self.assertTrue(run.to_dict()["lease_expires_at"].endswith("Z"))
         self.assertTrue(payload["finished_at"].endswith("Z"))
+        self.assertEqual(command_request.to_dict()["env"], {"PYTHONPATH": "/tmp/repo"})
+        self.assertEqual(command_result.to_dict()["timed_out"], True)
+        self.assertEqual(command_result.to_dict()["stdout_truncated"], True)
+        self.assertEqual(command_result.to_dict()["termination_reason"], "timeout")
 
         event = build_run_event(
             run.run_id,
-            EventType.COMMAND_COMPLETED,
+            EventType.COMMAND_TIMEOUT,
             sequence=3,
             task_id=task.task_id,
             task_status=TaskStatus.SUCCEEDED,
@@ -117,10 +145,12 @@ class TestSharedTypesContracts(unittest.TestCase):
             payload={"argv": ["pytest", "-q"]},
         )
         event_payload = event.to_dict()
-        self.assertEqual(event_payload["event_type"], "command.completed")
+        self.assertEqual(event_payload["event_type"], "command.timeout")
         self.assertEqual(event_payload["sequence"], 3)
         self.assertEqual(event_payload["task_status"], "succeeded")
         self.assertEqual(event_payload["payload"]["argv"], ["pytest", "-q"])
+
+        self.assertEqual(EventType.COMMAND_CANCELLED.value, "command.cancelled")
 
         round_tripped = json.loads(event.to_json())
         self.assertEqual(round_tripped["run_id"], str(run.run_id))
