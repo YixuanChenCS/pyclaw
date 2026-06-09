@@ -11,6 +11,7 @@ from packages.shared_types import (
     ErrorCodeContractError,
     EventType,
     InvalidRunStateError,
+    CommandRequest,
     RunRequest,
     RunStatus,
     Session,
@@ -19,25 +20,44 @@ from packages.shared_types import (
 from services.execution_runtime import LocalExecutionRuntimeService, SQLiteExecutionRuntimeRepository
 
 
+class _InMemoryRepoStore:
+    def __init__(self, workspaces: dict[str, Workspace] | None = None) -> None:
+        self._workspaces = dict(workspaces or {})
+
+    async def get_workspace(self, workspace_id):
+        return self._workspaces.get(str(workspace_id))
+
+
 class TestLocalExecutionRuntimeService(unittest.IsolatedAsyncioTestCase):
     def _make_runtime(
         self,
         root: Path,
+        *,
+        workspaces: dict[str, Workspace] | None = None,
     ) -> tuple[LocalExecutionRuntimeService, SQLiteExecutionRuntimeRepository]:
         repository = SQLiteExecutionRuntimeRepository(root / "runtime.sqlite3")
         service = LocalExecutionRuntimeService(
             repository=repository,
+            repo_store=_InMemoryRepoStore(workspaces),
             stream_poll_interval=0.01,
         )
         return service, repository
 
-    def _make_request(self) -> RunRequest:
-        workspace = Workspace(root_path="/tmp/runtime-workspace")
+    def _make_request(self, workspace: Workspace | None = None) -> RunRequest:
+        workspace = workspace or Workspace(root_path="/tmp/runtime-workspace")
         session = Session(workspace_id=workspace.workspace_id, title="runtime")
         return RunRequest(
             workspace_id=workspace.workspace_id,
             session_id=session.session_id,
             prompt="Implement runtime phase 1",
+        )
+
+    def _make_command_request(self, run_id: str, *, argv: tuple[str, ...], timeout_seconds=None) -> CommandRequest:
+        return CommandRequest(
+            run_id=run_id,
+            task_id="task_command",
+            argv=argv,
+            timeout_seconds=timeout_seconds,
         )
 
     async def _collect_events(self, stream, count: int):
@@ -183,6 +203,126 @@ class TestLocalExecutionRuntimeService(unittest.IsolatedAsyncioTestCase):
 
             with self.assertRaises(InvalidRunStateError):
                 await repository.update_run_status(run_id, RunStatus.RUNNING)
+
+    async def test_execute_command_emits_started_and_completed_for_success(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            result = await service.execute_command(
+                self._make_command_request(
+                    run_id,
+                    argv=("sh", "-c", "printf success"),
+                )
+            )
+
+            self.assertEqual(result.exit_code, 0)
+            self.assertEqual(result.stdout, "success")
+            events = await repository.list_events(run_id)
+            self.assertEqual(events[-2].event_type, EventType.COMMAND_STARTED)
+            self.assertEqual(events[-1].event_type, EventType.COMMAND_COMPLETED)
+
+    async def test_execute_command_emits_failed_for_non_zero_exit(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            result = await service.execute_command(
+                self._make_command_request(
+                    run_id,
+                    argv=("sh", "-c", "exit 7"),
+                )
+            )
+
+            self.assertEqual(result.exit_code, 7)
+            self.assertEqual(result.termination_reason, "exit_code")
+            events = await repository.list_events(run_id)
+            self.assertEqual(events[-1].event_type, EventType.COMMAND_FAILED)
+
+    async def test_execute_command_emits_timeout_for_timeout(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            result = await service.execute_command(
+                self._make_command_request(
+                    run_id,
+                    argv=("sh", "-c", "sleep 1"),
+                    timeout_seconds=0.05,
+                )
+            )
+
+            self.assertTrue(result.timed_out)
+            self.assertEqual(result.termination_reason, "timeout")
+            events = await repository.list_events(run_id)
+            self.assertEqual(events[-1].event_type, EventType.COMMAND_TIMEOUT)
+
+    async def test_stream_events_replays_command_events_after_execution(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, _repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            await service.execute_command(
+                self._make_command_request(
+                    run_id,
+                    argv=("sh", "-c", "printf replay"),
+                )
+            )
+
+            stream = service.stream_events(run_id)
+            events = await self._collect_events(stream, 5)
+            self.assertEqual(
+                [event.event_type for event in events],
+                [
+                    EventType.RUN_CREATED,
+                    EventType.RUN_QUEUED,
+                    EventType.RUN_STARTED,
+                    EventType.COMMAND_STARTED,
+                    EventType.COMMAND_COMPLETED,
+                ],
+            )
+
+    async def test_execute_command_does_not_finalize_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            await service.execute_command(
+                self._make_command_request(
+                    run_id,
+                    argv=("sh", "-c", "printf stay-running"),
+                )
+            )
+
+            run = await repository.get_run(run_id)
+            self.assertIsNotNone(run)
+            self.assertEqual(run.status, RunStatus.RUNNING)
+            self.assertIsNone(run.finished_at)
 
 
 if __name__ == "__main__":
