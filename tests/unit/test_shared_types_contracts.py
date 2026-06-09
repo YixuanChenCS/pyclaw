@@ -70,6 +70,10 @@ class TestSharedTypesContracts(unittest.TestCase):
             session_id=session.session_id,
             prompt="Implement Step 0 foundation",
             status=RunStatus.RUNNING,
+            worker_id="worker-1",
+            attempt=2,
+            lease_expires_at=finished_at,
+            last_heartbeat_at=started_at,
             started_at=started_at,
         )
         task = Task(
@@ -98,11 +102,15 @@ class TestSharedTypesContracts(unittest.TestCase):
         self.assertEqual(payload["status"], "succeeded")
         self.assertEqual(payload["artifacts"][0]["artifact_type"], "log")
         self.assertTrue(payload["artifacts"][0]["artifact_id"].startswith("artifact_"))
+        self.assertEqual(run.to_dict()["worker_id"], "worker-1")
+        self.assertEqual(run.to_dict()["attempt"], 2)
+        self.assertTrue(run.to_dict()["lease_expires_at"].endswith("Z"))
         self.assertTrue(payload["finished_at"].endswith("Z"))
 
         event = build_run_event(
             run.run_id,
             EventType.COMMAND_COMPLETED,
+            sequence=3,
             task_id=task.task_id,
             task_status=TaskStatus.SUCCEEDED,
             artifact_id=artifact.artifact_id,
@@ -110,6 +118,7 @@ class TestSharedTypesContracts(unittest.TestCase):
         )
         event_payload = event.to_dict()
         self.assertEqual(event_payload["event_type"], "command.completed")
+        self.assertEqual(event_payload["sequence"], 3)
         self.assertEqual(event_payload["task_status"], "succeeded")
         self.assertEqual(event_payload["payload"]["argv"], ["pytest", "-q"])
 

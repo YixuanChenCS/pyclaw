@@ -105,6 +105,10 @@ class Run(SerializableModel):
     prompt: str
     run_id: RunId = field(default_factory=new_run_id)
     status: RunStatus = RunStatus.QUEUED
+    worker_id: str | None = None
+    attempt: int = 0
+    lease_expires_at: datetime | None = None
+    last_heartbeat_at: datetime | None = None
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
     started_at: datetime | None = None
@@ -257,6 +261,7 @@ class RunEvent(SerializableModel):
     run_id: RunId
     event_type: EventType
     event_id: EventId = field(default_factory=new_event_id)
+    sequence: int = 0
     message: str | None = None
     run_status: RunStatus | None = None
     task_id: TaskId | None = None
