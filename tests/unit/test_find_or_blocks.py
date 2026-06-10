@@ -4,7 +4,9 @@ import difflib
 import io
 import re
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 
 from pyclaw.coders.base_coder import all_fences
 from pyclaw.coders.editblock_coder import find_original_update_blocks
@@ -71,7 +73,85 @@ def process_markdown(filename, fh):
 
 
 class TestFindOrBlocks(unittest.TestCase):
+    def _run_process_markdown(self, markdown_text, *, filename="chat-history.md"):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / filename
+            path.write_text(markdown_text, encoding="utf-8")
+            output = io.StringIO()
+            process_markdown(str(path), output)
+            return output.getvalue()
+
+    def test_process_markdown_formats_search_replace_block(self):
+        # Verifies that a single valid SEARCH/REPLACE block is rendered into the helper's report format.
+        # This catches formatting bugs where correctly parsed edits would be emitted under the wrong labels.
+        # The expected output is correct because the section contains exactly one well-formed block for foo.txt.
+        actual_output = self._run_process_markdown(
+            """#### change foo
+foo.txt
+```text
+<<<<<<< SEARCH
+before
+=======
+after
+>>>>>>> REPLACE
+```
+"""
+        )
+
+        self.assertEqual(
+            actual_output,
+            "\n\n@@@ #### change foo @@@@@@@@@@@@@@@@@@@@\n"
+            "@@@ SEARCH: foo.txt @@@@@@@@@@@@@@@@@@@@\n"
+            "before\n"
+            "@@@@@@@@@@@@@@@@@@@@\n"
+            "after\n"
+            "@@@ REPLACE @@@@@@@@@@@@@@@@@@@@\n",
+        )
+
+    def test_process_markdown_formats_shell_block(self):
+        # Verifies that a fenced shell snippet is preserved as a shell block in the integration helper output.
+        # This catches regressions where command blocks would be dropped or mislabeled as file edits.
+        # The expected output is correct because the section contains one bash fence and no SEARCH/REPLACE markers.
+        actual_output = self._run_process_markdown(
+            """#### run tests
+```bash
+pytest tests/unit/test_analytics.py
+```
+"""
+        )
+
+        self.assertEqual(
+            actual_output,
+            "\n\n@@@ #### run tests @@@@@@@@@@@@@@@@@@@@\n"
+            "@@@ SHELL @@@@@@@@@@@@@@@@@@@@\n"
+            "pytest tests/unit/test_analytics.py\n"
+            "@@@ ENDSHELL @@@@@@@@@@@@@@@@@@@@\n",
+        )
+
+    def test_process_markdown_reports_parser_errors_without_emitting_fake_edits(self):
+        # Verifies that the helper surfaces parser failures as errors instead of pretending malformed input parsed cleanly.
+        # This catches bugs where invalid blocks would be silently swallowed or rendered as partial edits.
+        # The expected error output is correct because the block is missing the required `=======` divider.
+        actual_output = self._run_process_markdown(
+            """#### broken edit
+foo.txt
+```text
+<<<<<<< SEARCH
+before
+after
+>>>>>>> REPLACE
+```
+"""
+        )
+
+        self.assertIn("@@@ #### broken edit @@@@@@@@@@@@@@@@@@@@", actual_output)
+        self.assertIn("Expected `=======`", actual_output)
+        self.assertNotIn("@@@ SEARCH:", actual_output)
+
     def test_process_markdown(self):
+        # Verifies the full chat-history fixture remains stable as an additional regression safety net.
+        # This catches broad behavior regressions across many mixed sections after the parser unit tests already prove core behavior.
+        # The expected output is correct because the gold file records the current intended rendering of the large historical fixture.
         # Path to the input markdown file
         input_file = "tests/fixtures/chat-history.md"
 

@@ -849,7 +849,7 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
     def _new_repo_map(self, workspace: WorkspaceRef) -> Any | None:
         try:
             from .repomap import RepoMap
-        except Exception:
+        except ImportError:
             return None
         return RepoMap(
             map_tokens=self.map_tokens,

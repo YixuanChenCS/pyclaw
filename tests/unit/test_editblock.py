@@ -109,6 +109,9 @@ Hope you like it!
         self.assertEqual(edits, [("foo.txt", "Two\n", "Tooooo\n")])
 
     def test_find_original_update_blocks_quote_below_filename(self):
+        # Verifies that a filename on the line above the fence is still bound to the block.
+        # This catches regressions where the parser only looks inside fenced content.
+        # The expected filename and texts are correct because the SEARCH/REPLACE markers are well formed.
         edit = """
 Here's the change:
 
@@ -128,6 +131,9 @@ Hope you like it!
         self.assertEqual(edits, [("foo.txt", "Two\n", "Tooooo\n")])
 
     def test_find_original_update_blocks_unclosed(self):
+        # Verifies that an unterminated block fails loudly instead of producing a partial edit.
+        # This catches silent truncation bugs where malformed model output would be accepted.
+        # The expected error text is correct because the block is missing the REPLACE terminator.
         edit = """
 Here's the change:
 
@@ -147,6 +153,9 @@ oops!
         self.assertIn("Expected `>>>>>>> REPLACE` or `=======`", str(cm.exception))
 
     def test_find_original_update_blocks_missing_filename(self):
+        # Verifies that a SEARCH/REPLACE block without any filename context is rejected.
+        # This catches bugs where edits could be applied to an implicit or wrong file.
+        # The expected error is correct because the parser cannot safely infer a target file here.
         edit = """
 Here's the change:
 
@@ -166,6 +175,9 @@ oops!
         self.assertIn("filename", str(cm.exception))
 
     def test_find_original_update_blocks_no_final_newline(self):
+        # Verifies that valid back-to-back edit blocks do not require a trailing newline at EOF.
+        # This catches regressions where the final block would be dropped just because the text ends immediately.
+        # The expected success is correct because each block still has valid SEARCH/DIVIDER/REPLACE markers.
         edit = """
 pyclaw/coder.py
 <<<<<<< SEARCH
@@ -199,6 +211,37 @@ pyclaw/coder.py
 
         # Should not raise a ValueError
         list(eb.find_original_update_blocks(edit))
+
+    def test_find_original_update_blocks_shell_block_yields_shell_command(self):
+        # Verifies that a fenced shell snippet is reported as a shell block, not as a file edit.
+        # This catches bugs where command suggestions would be misparsed as SEARCH/REPLACE edits.
+        # The expected tuple is correct because the block is a plain bash fence with no edit markers.
+        edit = """
+Here's a command to run:
+
+```bash
+python -m pytest tests/unit/test_editblock.py
+```
+"""
+
+        edits = list(eb.find_original_update_blocks(edit))
+        self.assertEqual(edits, [(None, "python -m pytest tests/unit/test_editblock.py\n")])
+
+    def test_find_original_update_blocks_missing_divider_fails_loudly(self):
+        # Verifies that a block missing the SEARCH/REPLACE divider raises instead of being guessed.
+        # This catches permissive parsing bugs where invalid model output could be treated as an edit.
+        # The expected error text is correct because `=======` is the required divider marker.
+        edit = """
+foo.txt
+<<<<<<< SEARCH
+before
+after
+>>>>>>> REPLACE
+"""
+
+        with self.assertRaises(ValueError) as cm:
+            list(eb.find_original_update_blocks(edit))
+        self.assertIn("Expected `=======`", str(cm.exception))
 
     def test_incomplete_edit_block_missing_filename(self):
         edit = """

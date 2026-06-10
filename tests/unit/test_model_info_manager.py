@@ -78,3 +78,19 @@ class TestModelInfoManager(TestCase):
 
             # Verify _update_cache was called with verify=False
             mock_get.assert_called_with(self.manager.MODEL_INFO_URL, timeout=5, verify=False)
+
+    def test_corrupt_cache_triggers_update_instead_of_partial_load(self):
+        # Verifies a corrupt cache file is treated as invalid and triggers the update path.
+        # This catches bugs where malformed cached JSON would be used as if it were valid model metadata.
+        # The expected fresh value is correct because get_model_from_cached_json_db should ignore invalid cache JSON.
+        self.manager.cache_file.write_text("{not json", encoding="utf-8")
+
+        def fake_update():
+            self.manager.content = {"test_model": {"max_tokens": 8192}}
+
+        with patch.object(self.manager, "_update_cache", side_effect=fake_update) as mock_update:
+            result = self.manager.get_model_from_cached_json_db("test_model")
+
+        self.assertEqual(result, {"max_tokens": 8192})
+        self.assertTrue(self.manager._cache_loaded)
+        mock_update.assert_called_once()

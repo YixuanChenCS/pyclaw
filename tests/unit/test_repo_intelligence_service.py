@@ -413,6 +413,23 @@ class TestLocalRepoIntelligenceService(unittest.IsolatedAsyncioTestCase):
 
             self.assertIsInstance(repo_map, RepoMap)
 
+    async def test_new_repo_map_propagates_initialization_failures(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            service = LocalRepoIntelligenceService()
+            workspace = await service.inspect_workspace(Workspace(root_path=str(root)))
+
+            # Verifies that a real RepoMap construction bug fails loudly.
+            # This catches broad fallback logic that would hide broken initialization.
+            # Propagating the RuntimeError is correct because this is not an optional import case.
+            with patch.object(
+                importlib.import_module("services.repo_intelligence.repomap"),
+                "RepoMap",
+                side_effect=RuntimeError("broken repo map"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "broken repo map"):
+                    service._new_repo_map(workspace)
+
     async def test_refresh_index_invalidates_changed_file_analysis_cache(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
