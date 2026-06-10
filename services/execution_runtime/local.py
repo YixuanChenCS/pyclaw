@@ -341,7 +341,40 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
         raise NotImplementedError("Phase 1 does not implement artifact persistence.")
 
     async def finalize_run(self, run_id: str, result: RunResult) -> None:
-        raise NotImplementedError("Phase 1 does not implement run finalization.")
+        await self._ensure_started()
+        if str(result.run_id) != run_id:
+            raise ErrorCodeContractError(
+                ErrorCode.INVALID_REQUEST,
+                "finalize_run run_id must match result.run_id.",
+                details={"run_id": run_id, "result_run_id": str(result.run_id)},
+            )
+
+        run = await self._repository.get_run(result.run_id)
+        if run is None:
+            raise EntityNotFoundError("run", str(result.run_id))
+        if result.status not in TERMINAL_RUN_STATUSES:
+            raise ErrorCodeContractError(
+                ErrorCode.INVALID_REQUEST,
+                f"finalize_run requires a terminal status, got {result.status.value}.",
+                details={"status": result.status.value},
+            )
+
+        payload = {}
+        if result.summary is not None:
+            payload["summary"] = result.summary
+        if result.error_message is not None:
+            payload["error_message"] = result.error_message
+        if result.artifacts:
+            payload["artifact_ids"] = [str(artifact.artifact_id) for artifact in result.artifacts]
+
+        message = result.summary or result.error_message
+        await self._repository.update_run_status(
+            run.run_id,
+            result.status,
+            message=message,
+            payload=payload or None,
+        )
+        await self._release_workspace_lock(run_id)
 
     async def deploy(self, request: DeploymentRequest) -> DeploymentResult:
         raise NotImplementedError("Phase 1 does not implement deployment.")
