@@ -9,6 +9,7 @@ import sqlite3
 from typing import Iterator, Mapping, Sequence
 
 from packages.shared_types import (
+    ApprovalRequest,
     ApprovalId,
     Artifact,
     ArtifactId,
@@ -131,6 +132,12 @@ class SQLiteExecutionRuntimeRepository:
 
     async def list_artifacts(self, run_id: RunId | str) -> tuple[Artifact, ...]:
         return await asyncio.to_thread(self._list_artifacts_sync, RunId(str(run_id)))
+
+    async def create_approval_request(self, request: ApprovalRequest) -> RunEvent:
+        return await asyncio.to_thread(self._create_approval_request_sync, request)
+
+    async def list_approval_requests(self, run_id: RunId | str) -> tuple[ApprovalRequest, ...]:
+        return await asyncio.to_thread(self._list_approval_requests_sync, RunId(str(run_id)))
 
     def _initialize(self) -> None:
         connection = self._connect()
@@ -471,6 +478,73 @@ class SQLiteExecutionRuntimeRepository:
             connection.close()
         return tuple(self._artifact_from_row(row) for row in rows)
 
+    def _create_approval_request_sync(self, request: ApprovalRequest) -> RunEvent:
+        with self._transaction("IMMEDIATE") as connection:
+            row = self._select_run_for_update(connection, request.run_id)
+            current = self._run_from_row(row)
+            validate_run_transition(current.status, RunStatus.WAITING_FOR_APPROVAL)
+
+            connection.execute(
+                """
+                INSERT INTO approvals (
+                    approval_id, run_id, task_id, patch_id, reason, command_argv_json,
+                    created_at, expires_at, approved, decided_at, reviewer, comment
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)
+                """,
+                (
+                    str(request.approval_id),
+                    str(request.run_id),
+                    str(request.task_id) if request.task_id is not None else None,
+                    str(request.patch_id) if request.patch_id is not None else None,
+                    request.reason,
+                    json_dumps({"command_argv": list(request.command_argv)}),
+                    serialize_datetime(request.created_at),
+                    serialize_datetime(request.expires_at),
+                ),
+            )
+
+            suspended = replace(
+                current,
+                status=RunStatus.WAITING_FOR_APPROVAL,
+                worker_id=None,
+                lease_expires_at=None,
+                last_heartbeat_at=None,
+                updated_at=request.created_at,
+                finished_at=None,
+            )
+            self._update_run_row(connection, suspended)
+            event = build_run_event(
+                run_id=current.run_id,
+                event_type=EventType.APPROVAL_REQUESTED,
+                message=request.reason,
+                run_status=RunStatus.WAITING_FOR_APPROVAL,
+                task_id=request.task_id,
+                approval_id=request.approval_id,
+                artifact_id=request.patch_id,
+                payload={
+                    "approval_id": str(request.approval_id),
+                    "command_argv": list(request.command_argv),
+                    "expires_at": serialize_datetime(request.expires_at),
+                },
+            )
+            return self._append_event_with_sequence_in_tx(connection, current.run_id, event)
+
+    def _list_approval_requests_sync(self, run_id: RunId) -> tuple[ApprovalRequest, ...]:
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                """
+                SELECT * FROM approvals
+                WHERE run_id = ?
+                ORDER BY created_at ASC, approval_id ASC
+                """,
+                (str(run_id),),
+            ).fetchall()
+        finally:
+            connection.close()
+        return tuple(self._approval_request_from_row(row) for row in rows)
+
     def _insert_run(self, connection: sqlite3.Connection, run: Run) -> None:
         connection.execute(
             """
@@ -613,6 +687,22 @@ class SQLiteExecutionRuntimeRepository:
             label=row["label"],
             uri=row["uri"],
             created_at=parse_datetime(row["created_at"]) or utc_now(),
+        )
+
+    def _approval_request_from_row(self, row: sqlite3.Row) -> ApprovalRequest:
+        payload = json_loads(row["command_argv_json"])
+        command_argv = payload.get("command_argv", [])
+        if not isinstance(command_argv, list):
+            command_argv = []
+        return ApprovalRequest(
+            approval_id=ApprovalId(row["approval_id"]),
+            run_id=RunId(row["run_id"]),
+            task_id=TaskId(row["task_id"]) if row["task_id"] else None,
+            patch_id=ArtifactId(row["patch_id"]) if row["patch_id"] else None,
+            reason=row["reason"],
+            command_argv=tuple(str(item) for item in command_argv),
+            created_at=parse_datetime(row["created_at"]) or utc_now(),
+            expires_at=parse_datetime(row["expires_at"]),
         )
 
 

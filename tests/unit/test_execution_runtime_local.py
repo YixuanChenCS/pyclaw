@@ -8,7 +8,9 @@ import tempfile
 import unittest
 
 from packages.shared_types import (
+    ApprovalRequest,
     ArtifactType,
+    EntityNotFoundError,
     ErrorCode,
     ErrorCodeContractError,
     EventType,
@@ -77,6 +79,20 @@ class TestLocalExecutionRuntimeService(unittest.IsolatedAsyncioTestCase):
             summary=summary,
             unified_diff=unified_diff,
             target_paths=target_paths,
+        )
+
+    def _make_approval_request(
+        self,
+        run_id: str,
+        *,
+        reason: str = "Need approval to continue",
+        command_argv: tuple[str, ...] = (),
+    ) -> ApprovalRequest:
+        return ApprovalRequest(
+            run_id=run_id,
+            task_id="task_approval",
+            reason=reason,
+            command_argv=command_argv,
         )
 
     async def _collect_events(self, stream, count: int):
@@ -342,6 +358,119 @@ class TestLocalExecutionRuntimeService(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(run)
             self.assertEqual(run.status, RunStatus.RUNNING)
             self.assertIsNone(run.finished_at)
+
+    async def test_request_approval_persists_approval_request(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            approval_request = self._make_approval_request(
+                run_id,
+                command_argv=("git", "push"),
+            )
+            approval_id = await service.request_approval(run_id, approval_request)
+
+            self.assertEqual(approval_id, str(approval_request.approval_id))
+            approvals = await repository.list_approval_requests(run_id)
+            self.assertEqual(len(approvals), 1)
+            self.assertEqual(approvals[0].approval_id, approval_request.approval_id)
+            self.assertEqual(approvals[0].reason, approval_request.reason)
+            self.assertEqual(approvals[0].command_argv, ("git", "push"))
+
+    async def test_request_approval_transitions_running_to_waiting_for_approval(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            await service.request_approval(run_id, self._make_approval_request(run_id))
+
+            run = await repository.get_run(run_id)
+            self.assertIsNotNone(run)
+            self.assertEqual(run.status, RunStatus.WAITING_FOR_APPROVAL)
+            self.assertIsNone(run.worker_id)
+            self.assertIsNone(run.lease_expires_at)
+
+    async def test_request_approval_event_is_replayable(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, _repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            approval_request = self._make_approval_request(run_id)
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            await service.request_approval(run_id, approval_request)
+
+            stream = service.stream_events(run_id)
+            events = await self._collect_events(stream, 4)
+            self.assertEqual(
+                [event.event_type for event in events],
+                [
+                    EventType.RUN_CREATED,
+                    EventType.RUN_QUEUED,
+                    EventType.RUN_STARTED,
+                    EventType.APPROVAL_REQUESTED,
+                ],
+            )
+            self.assertEqual(events[-1].approval_id, approval_request.approval_id)
+
+    async def test_request_approval_does_not_finalize_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            await service.request_approval(run_id, self._make_approval_request(run_id))
+
+            run = await repository.get_run(run_id)
+            self.assertIsNotNone(run)
+            self.assertEqual(run.status, RunStatus.WAITING_FOR_APPROVAL)
+            self.assertIsNone(run.finished_at)
+
+    async def test_terminal_runs_cannot_request_approval(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            await repository.update_run_status(run_id, RunStatus.SUCCEEDED)
+
+            with self.assertRaises(InvalidRunStateError):
+                await service.request_approval(run_id, self._make_approval_request(run_id))
+
+    async def test_request_approval_raises_for_non_existent_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, _repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+
+            with self.assertRaises(EntityNotFoundError):
+                await service.request_approval(
+                    "run_missing",
+                    self._make_approval_request("run_missing"),
+                )
 
     async def test_cancel_queued_run(self):
         with tempfile.TemporaryDirectory() as tmpdir:

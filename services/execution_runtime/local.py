@@ -335,7 +335,25 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
         return artifact
 
     async def request_approval(self, run_id: str, request: ApprovalRequest) -> str:
-        raise NotImplementedError("Phase 1 does not implement approval checkpoints.")
+        await self._ensure_started()
+        if str(request.run_id) != run_id:
+            raise ErrorCodeContractError(
+                ErrorCode.INVALID_REQUEST,
+                "request_approval run_id must match request.run_id.",
+                details={"run_id": run_id, "request_run_id": str(request.run_id)},
+            )
+
+        run = await self._repository.get_run(request.run_id)
+        if run is None:
+            raise EntityNotFoundError("run", str(request.run_id))
+        if run.status != RunStatus.RUNNING:
+            raise InvalidRunStateError(
+                f"Cannot request approval for run {run.run_id} in status {run.status.value}"
+            )
+
+        await self._repository.create_approval_request(request)
+        await self._release_workspace_lock(run_id)
+        return str(request.approval_id)
 
     async def attach_artifacts(self, run_id: str, artifacts: Sequence[ArtifactRef]) -> None:
         raise NotImplementedError("Phase 1 does not implement artifact persistence.")
