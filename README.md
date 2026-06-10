@@ -27,6 +27,20 @@ packages/
   provider_adapters/
 ```
 
+## Local Execution Runtime
+
+The local execution runtime MVP is implemented under `services/execution_runtime/`.
+
+- durable SQLite-backed runs, events, artifacts, and approvals
+- replayable event stream sourced from SQLite
+- local command execution with timeout and cancellation handling
+- local patch application for workspace files
+- run cancellation and explicit finalization
+- minimal approval suspension via `RUNNING -> WAITING_FOR_APPROVAL`
+- end-to-end integration coverage in `tests/integration/test_execution_runtime_e2e.py`
+
+Architecture details and current limitations are documented in [docs/execution_runtime_architecture.md](docs/execution_runtime_architecture.md). Approval resume, deployment, remote sandboxing, and distributed workers are future work.
+
 ## Roadmap
 
 - Finish shared contracts
