@@ -18,9 +18,11 @@ from packages.shared_types import (
     CommandRequest,
     PatchProposal,
     RunRequest,
+    RunResult,
     RunStatus,
     Session,
     Workspace,
+    build_run_event,
 )
 from services.execution_runtime import LocalExecutionRuntimeService, SQLiteExecutionRuntimeRepository
 
@@ -201,7 +203,129 @@ class TestLocalExecutionRuntimeService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(stored.attempt, 1)
             self.assertEqual(stored.worker_id, claimed_runs[0].worker_id)
 
-    async def test_stale_running_runs_are_recovered_on_startup(self):
+    async def test_same_workspace_second_run_is_not_claimed_while_first_is_running(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(Path(tmpdir))
+
+            first_run_id = await service.enqueue_run(self._make_request(workspace))
+            second_run_id = await service.enqueue_run(self._make_request(workspace))
+
+            first_claim = await service.claim_next_run("worker-a", lease_seconds=30)
+            second_claim = await service.claim_next_run("worker-b", lease_seconds=30)
+
+            self.assertIsNotNone(first_claim)
+            self.assertEqual(str(first_claim.run_id), first_run_id)
+            self.assertIsNone(second_claim)
+
+            stored_second = await repository.get_run(second_run_id)
+            self.assertIsNotNone(stored_second)
+            self.assertEqual(stored_second.status, RunStatus.QUEUED)
+
+    async def test_same_workspace_second_run_can_be_claimed_after_first_finalizes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(Path(tmpdir))
+
+            first_run_id = await service.enqueue_run(self._make_request(workspace))
+            second_run_id = await service.enqueue_run(self._make_request(workspace))
+
+            first_claim = await service.claim_next_run("worker-a", lease_seconds=30)
+            self.assertIsNotNone(first_claim)
+            self.assertIsNone(await service.claim_next_run("worker-b", lease_seconds=30))
+
+            await service.finalize_run(
+                first_run_id,
+                RunResult(
+                    run_id=first_claim.run_id,
+                    status=RunStatus.SUCCEEDED,
+                    summary="done",
+                ),
+            )
+
+            second_claim = await service.claim_next_run("worker-b", lease_seconds=30)
+            self.assertIsNotNone(second_claim)
+            self.assertEqual(str(second_claim.run_id), second_run_id)
+
+            stored_second = await repository.get_run(second_run_id)
+            self.assertIsNotNone(stored_second)
+            self.assertEqual(stored_second.status, RunStatus.RUNNING)
+
+    async def test_same_workspace_second_run_can_be_claimed_after_first_is_cancelled(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(Path(tmpdir))
+
+            first_run_id = await service.enqueue_run(self._make_request(workspace))
+            second_run_id = await service.enqueue_run(self._make_request(workspace))
+
+            first_claim = await service.claim_next_run("worker-a", lease_seconds=30)
+            self.assertIsNotNone(first_claim)
+            self.assertIsNone(await service.claim_next_run("worker-b", lease_seconds=30))
+
+            await service.cancel_run(first_run_id, reason="release workspace")
+
+            second_claim = await service.claim_next_run("worker-b", lease_seconds=30)
+            self.assertIsNotNone(second_claim)
+            self.assertEqual(str(second_claim.run_id), second_run_id)
+
+            stored_second = await repository.get_run(second_run_id)
+            self.assertIsNotNone(stored_second)
+            self.assertEqual(stored_second.status, RunStatus.RUNNING)
+
+    async def test_different_workspaces_can_be_claimed_independently(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            workspace_a_root = root / "ws-a"
+            workspace_b_root = root / "ws-b"
+            workspace_a_root.mkdir()
+            workspace_b_root.mkdir()
+            workspace_a = Workspace(root_path=str(workspace_a_root))
+            workspace_b = Workspace(root_path=str(workspace_b_root))
+            service, _repository = self._make_runtime(root)
+
+            first_run_id = await service.enqueue_run(self._make_request(workspace_a))
+            second_run_id = await service.enqueue_run(self._make_request(workspace_b))
+
+            first_claim, second_claim = await asyncio.gather(
+                service.claim_next_run("worker-a", lease_seconds=30),
+                service.claim_next_run("worker-b", lease_seconds=30),
+            )
+
+            self.assertIsNotNone(first_claim)
+            self.assertIsNotNone(second_claim)
+            self.assertEqual(
+                {str(first_claim.run_id), str(second_claim.run_id)},
+                {first_run_id, second_run_id},
+            )
+
+    async def test_same_workspace_exclusion_is_durable_across_service_instances(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            workspace = Workspace(root_path=tmpdir)
+            repository_a = SQLiteExecutionRuntimeRepository(root / "runtime.sqlite3")
+            repository_b = SQLiteExecutionRuntimeRepository(root / "runtime.sqlite3")
+            service_a = LocalExecutionRuntimeService(
+                repository=repository_a,
+                repo_store=_InMemoryRepoStore(),
+                stream_poll_interval=0.01,
+            )
+            service_b = LocalExecutionRuntimeService(
+                repository=repository_b,
+                repo_store=_InMemoryRepoStore(),
+                stream_poll_interval=0.01,
+            )
+
+            await service_a.enqueue_run(self._make_request(workspace))
+            await service_a.enqueue_run(self._make_request(workspace))
+
+            first_claim = await service_a.claim_next_run("worker-a", lease_seconds=30)
+            second_claim = await service_b.claim_next_run("worker-b", lease_seconds=30)
+
+            self.assertIsNotNone(first_claim)
+            self.assertIsNone(second_claim)
+
+    async def test_stale_running_runs_without_side_effects_are_requeued_on_startup(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             service, repository = self._make_runtime(root)
@@ -226,6 +350,87 @@ class TestLocalExecutionRuntimeService(unittest.IsolatedAsyncioTestCase):
             events = await repository.list_events(run_id)
             self.assertEqual(events[-1].event_type, EventType.RUN_QUEUED)
             self.assertEqual(events[-1].run_status, RunStatus.QUEUED)
+
+    async def test_stale_running_run_after_patch_is_not_automatically_requeued(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(
+                root,
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+            file_path = root / "app.txt"
+            file_path.write_text("before\n", encoding="utf-8")
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            claimed = await service.claim_next_run("worker-a", lease_seconds=0)
+            self.assertIsNotNone(claimed)
+            await service.apply_patch(
+                run_id,
+                self._make_patch_proposal(
+                    run_id,
+                    unified_diff="--- a/app.txt\n+++ b/app.txt\n@@ -1 +1 @@\n-before\n+after\n",
+                    target_paths=("app.txt",),
+                ),
+            )
+            await asyncio.sleep(0.02)
+
+            restarted = LocalExecutionRuntimeService(
+                repository=repository,
+                stream_poll_interval=0.01,
+            )
+            await restarted.enqueue_run(self._make_request(workspace))
+
+            recovered = await repository.get_run(run_id)
+            self.assertIsNotNone(recovered)
+            self.assertEqual(recovered.status, RunStatus.WAITING_FOR_APPROVAL)
+            self.assertIsNone(recovered.worker_id)
+            self.assertIsNone(recovered.lease_expires_at)
+
+            approvals = await repository.list_approval_requests(run_id)
+            self.assertEqual(len(approvals), 1)
+
+            stream = restarted.stream_events(run_id)
+            events = await self._collect_events(stream, 7)
+            self.assertEqual(events[-2].event_type, EventType.APPROVAL_REQUESTED)
+            self.assertEqual(events[-1].event_type, EventType.AGENT_MESSAGE)
+            self.assertEqual(events[-1].payload["kind"], "manual_recovery_required")
+
+    async def test_stale_running_run_after_command_start_is_not_automatically_requeued(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            service, repository = self._make_runtime(root)
+
+            run_id = await service.enqueue_run(self._make_request())
+            claimed = await service.claim_next_run("worker-a", lease_seconds=0)
+            self.assertIsNotNone(claimed)
+            await repository.append_event_with_sequence(
+                run_id,
+                build_run_event(
+                    run_id=claimed.run_id,
+                    event_type=EventType.COMMAND_STARTED,
+                    run_status=RunStatus.RUNNING,
+                    task_id="task_command_recovery",
+                    payload={"argv": ["python", "-m", "unittest"]},
+                ),
+            )
+            await asyncio.sleep(0.02)
+
+            restarted = LocalExecutionRuntimeService(
+                repository=repository,
+                stream_poll_interval=0.01,
+            )
+            await restarted.enqueue_run(self._make_request())
+
+            recovered = await repository.get_run(run_id)
+            self.assertIsNotNone(recovered)
+            self.assertEqual(recovered.status, RunStatus.WAITING_FOR_APPROVAL)
+            self.assertIsNone(recovered.worker_id)
+            self.assertIsNone(recovered.lease_expires_at)
+
+            events = await repository.list_events(run_id)
+            self.assertEqual(events[-2].event_type, EventType.APPROVAL_REQUESTED)
+            self.assertEqual(events[-1].event_type, EventType.AGENT_MESSAGE)
 
     async def test_terminal_runs_cannot_transition_back_to_running(self):
         with tempfile.TemporaryDirectory() as tmpdir:

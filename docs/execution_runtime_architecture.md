@@ -54,9 +54,22 @@ Run claiming is SQLite-backed and atomic:
 - the worker lease, attempt count, and heartbeat timestamps are stored on the run
 - `run.started` is appended durably
 
-Heartbeats extend the lease for an owned `RUNNING` run. Crash recovery scans for stale leased runs on startup and requeues them.
+Heartbeats extend the lease for an owned `RUNNING` run. Crash recovery scans for stale leased runs on startup and then either requeues them or parks them for manual recovery depending on durable side-effect history.
 
-Current recovery behavior is intentionally local-MVP-only. Before side-effecting execution is expanded further, stale `RUNNING` recovery must be revisited so recovery does not incorrectly requeue partially executed work without task-level checkpoints.
+SQLite also serializes active mutating runs per workspace. A queued run cannot be claimed if another `RUNNING` run for the same workspace still has a valid lease. The exclusion check and the claim happen in the same SQLite transaction, so it does not rely on in-memory worker coordination.
+
+## Recovery Policy
+
+Stale `RUNNING` recovery is now conservative and event-history-aware.
+
+- if a stale `RUNNING` run has no durable side-effect events after `run.started`, it is requeued
+- if a stale `RUNNING` run has durable side-effect events such as `command.started` or `patch.applied`, it is not requeued automatically
+- instead, the run moves to `WAITING_FOR_APPROVAL`
+- the expired worker lease is cleared
+- a durable approval/manual-recovery record is persisted
+- replayable recovery events are appended so operators can see why the run stopped
+
+This avoids blindly restarting work that may already have mutated the workspace.
 
 ## Command Execution
 
@@ -126,6 +139,7 @@ What is not implemented yet:
 - approval rejection
 - approval expiry handling
 - run resume from `WAITING_FOR_APPROVAL`
+- continuation-aware recovery after manual inspection
 
 ## End-To-End Test Coverage
 
@@ -148,4 +162,4 @@ That test verifies patch application and command execution both leave the run ac
 - remote sandbox execution is future work
 - distributed workers are future work
 - patch application is strict and does not do fuzzy matching
-- stale-running recovery policy should be revisited before broader side-effecting execution is added
+- full approval-based recovery and continuation remain future work

@@ -34,6 +34,13 @@ from packages.shared_types import (
 from .events import json_dumps, json_loads, parse_datetime, run_status_event_type, serialize_datetime
 from .state_machine import TERMINAL_RUN_STATUSES, validate_run_transition
 
+_RECOVERY_SIDE_EFFECT_EVENT_TYPES = frozenset(
+    {
+        EventType.COMMAND_STARTED,
+        EventType.PATCH_APPLIED,
+    }
+)
+
 
 class SQLiteExecutionRuntimeRepository:
     """SQLite-backed durable store for local execution runtime state."""
@@ -326,15 +333,29 @@ class SQLiteExecutionRuntimeRepository:
     def _claim_next_run_sync(self, worker_id: str, lease_seconds: int) -> Run | None:
         now = utc_now()
         lease_expires_at = now + timedelta(seconds=lease_seconds)
+        serialized_now = serialize_datetime(now)
         with self._transaction("IMMEDIATE") as connection:
             row = connection.execute(
                 """
-                SELECT * FROM runs
-                WHERE status = ?
-                ORDER BY created_at ASC, run_id ASC
+                SELECT queued.*
+                FROM runs AS queued
+                WHERE queued.status = ?
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM runs AS active
+                      WHERE active.workspace_id = queued.workspace_id
+                        AND active.status = ?
+                        AND active.lease_expires_at IS NOT NULL
+                        AND active.lease_expires_at >= ?
+                  )
+                ORDER BY queued.created_at ASC, queued.run_id ASC
                 LIMIT 1
                 """,
-                (RunStatus.QUEUED.value,),
+                (
+                    RunStatus.QUEUED.value,
+                    RunStatus.RUNNING.value,
+                    serialized_now,
+                ),
             ).fetchone()
             if row is None:
                 return None
@@ -407,6 +428,7 @@ class SQLiteExecutionRuntimeRepository:
 
     def _recover_stale_runs_sync(self, now: datetime) -> tuple[Run, ...]:
         recovered_runs: list[Run] = []
+        serialized_now = serialize_datetime(now)
         with self._transaction("IMMEDIATE") as connection:
             rows = connection.execute(
                 """
@@ -414,32 +436,91 @@ class SQLiteExecutionRuntimeRepository:
                 WHERE status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
                 ORDER BY lease_expires_at ASC, run_id ASC
                 """,
-                (RunStatus.RUNNING.value, serialize_datetime(now)),
+                (RunStatus.RUNNING.value, serialized_now),
             ).fetchall()
             for row in rows:
                 current = self._run_from_row(row)
-                # TODO: Before enabling side-effecting command execution, recovery strategy must be revisited.
-                # Stale RUNNING runs should become FAILED or RECOVERABLE unless task-level checkpoints exist.
-                recovered = replace(
-                    current,
-                    status=RunStatus.QUEUED,
-                    worker_id=None,
-                    lease_expires_at=None,
-                    last_heartbeat_at=None,
-                    updated_at=now,
+                side_effect_event_types = self._side_effect_events_since_last_start(
+                    connection,
+                    current.run_id,
                 )
-                self._update_run_row(connection, recovered)
-                event = build_run_status_event(
-                    recovered,
-                    EventType.RUN_QUEUED,
-                    message="Recovered stale run after lease expiry.",
-                    payload={
-                        "recovered_from_status": current.status.value,
-                        "previous_worker_id": current.worker_id,
-                        "attempt": current.attempt,
-                    },
-                )
-                self._append_event_with_sequence_in_tx(connection, recovered.run_id, event)
+                if side_effect_event_types:
+                    approval_request = ApprovalRequest(
+                        run_id=current.run_id,
+                        reason=(
+                            "Manual recovery required because the worker lease expired after side effects."
+                        ),
+                        created_at=now,
+                    )
+                    recovered = replace(
+                        current,
+                        status=RunStatus.WAITING_FOR_APPROVAL,
+                        worker_id=None,
+                        lease_expires_at=None,
+                        last_heartbeat_at=None,
+                        updated_at=now,
+                    )
+                    self._update_run_row(connection, recovered)
+                    self._insert_approval_request(connection, approval_request)
+                    self._append_event_with_sequence_in_tx(
+                        connection,
+                        recovered.run_id,
+                        build_run_event(
+                            run_id=recovered.run_id,
+                            event_type=EventType.APPROVAL_REQUESTED,
+                            message=approval_request.reason,
+                            run_status=RunStatus.WAITING_FOR_APPROVAL,
+                            approval_id=approval_request.approval_id,
+                            payload={
+                                "kind": "manual_recovery",
+                                "recovered_from_status": current.status.value,
+                                "previous_worker_id": current.worker_id,
+                                "attempt": current.attempt,
+                            },
+                        ),
+                    )
+                    self._append_event_with_sequence_in_tx(
+                        connection,
+                        recovered.run_id,
+                        build_run_event(
+                            run_id=recovered.run_id,
+                            event_type=EventType.AGENT_MESSAGE,
+                            message=(
+                                "Worker lease expired after side effects; run requires manual recovery."
+                            ),
+                            run_status=RunStatus.WAITING_FOR_APPROVAL,
+                            approval_id=approval_request.approval_id,
+                            payload={
+                                "kind": "manual_recovery_required",
+                                "side_effect_event_types": sorted(side_effect_event_types),
+                            },
+                        ),
+                    )
+                else:
+                    recovered = replace(
+                        current,
+                        status=RunStatus.QUEUED,
+                        worker_id=None,
+                        lease_expires_at=None,
+                        last_heartbeat_at=None,
+                        updated_at=now,
+                    )
+                    self._update_run_row(connection, recovered)
+                    self._append_event_with_sequence_in_tx(
+                        connection,
+                        recovered.run_id,
+                        build_run_status_event(
+                            recovered,
+                            EventType.RUN_QUEUED,
+                            message="Recovered stale run after lease expiry before side effects.",
+                            payload={
+                                "recovered_from_status": current.status.value,
+                                "previous_worker_id": current.worker_id,
+                                "attempt": current.attempt,
+                                "recovery_strategy": "requeued",
+                            },
+                        ),
+                    )
                 recovered_runs.append(recovered)
         return tuple(recovered_runs)
 
@@ -484,25 +565,7 @@ class SQLiteExecutionRuntimeRepository:
             current = self._run_from_row(row)
             validate_run_transition(current.status, RunStatus.WAITING_FOR_APPROVAL)
 
-            connection.execute(
-                """
-                INSERT INTO approvals (
-                    approval_id, run_id, task_id, patch_id, reason, command_argv_json,
-                    created_at, expires_at, approved, decided_at, reviewer, comment
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)
-                """,
-                (
-                    str(request.approval_id),
-                    str(request.run_id),
-                    str(request.task_id) if request.task_id is not None else None,
-                    str(request.patch_id) if request.patch_id is not None else None,
-                    request.reason,
-                    json_dumps({"command_argv": list(request.command_argv)}),
-                    serialize_datetime(request.created_at),
-                    serialize_datetime(request.expires_at),
-                ),
-            )
+            self._insert_approval_request(connection, request)
 
             suspended = replace(
                 current,
@@ -605,6 +668,60 @@ class SQLiteExecutionRuntimeRepository:
         if row is None:
             raise EntityNotFoundError("run", str(run_id))
         return row
+
+    def _insert_approval_request(
+        self,
+        connection: sqlite3.Connection,
+        request: ApprovalRequest,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO approvals (
+                approval_id, run_id, task_id, patch_id, reason, command_argv_json,
+                created_at, expires_at, approved, decided_at, reviewer, comment
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)
+            """,
+            (
+                str(request.approval_id),
+                str(request.run_id),
+                str(request.task_id) if request.task_id is not None else None,
+                str(request.patch_id) if request.patch_id is not None else None,
+                request.reason,
+                json_dumps({"command_argv": list(request.command_argv)}),
+                serialize_datetime(request.created_at),
+                serialize_datetime(request.expires_at),
+            ),
+        )
+
+    def _side_effect_events_since_last_start(
+        self,
+        connection: sqlite3.Connection,
+        run_id: RunId,
+    ) -> set[str]:
+        last_started_row = connection.execute(
+            """
+            SELECT COALESCE(MAX(sequence), 0) AS max_sequence
+            FROM run_events
+            WHERE run_id = ? AND event_type = ?
+            """,
+            (str(run_id), EventType.RUN_STARTED.value),
+        ).fetchone()
+        last_started_sequence = int(last_started_row["max_sequence"])
+        rows = connection.execute(
+            """
+            SELECT event_type
+            FROM run_events
+            WHERE run_id = ? AND sequence > ?
+            ORDER BY sequence ASC
+            """,
+            (str(run_id), last_started_sequence),
+        ).fetchall()
+        return {
+            row["event_type"]
+            for row in rows
+            if row["event_type"] in {event_type.value for event_type in _RECOVERY_SIDE_EFFECT_EVENT_TYPES}
+        }
 
     def _append_event_with_sequence_in_tx(
         self,
