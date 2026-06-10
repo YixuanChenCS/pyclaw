@@ -53,13 +53,44 @@ class AgentPlan(SerializableModel):
 class AgentAction(SerializableModel):
     type: AgentActionType
     reason: str
+    target_files: tuple[str, ...] = ()
     command_argv: tuple[str, ...] = ()
     cwd: str | None = None
     patch_diff: str | None = None
+    allow_file_deletions: bool = False
     approval_message: str | None = None
     approval_risk_reason: str | None = None
     summary_text: str | None = None
     requested_context: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PatchReview(SerializableModel):
+    accepted: bool
+    reason: str
+    changed_files: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+    patch_diff: str | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RunSummary(SerializableModel):
+    final_status: str
+    completed_steps: tuple[str, ...] = ()
+    attempted_actions: tuple[str, ...] = ()
+    changed_files: tuple[str, ...] = ()
+    commands_run: tuple[tuple[str, ...], ...] = ()
+    checks_passed: bool | None = None
+    warnings: tuple[str, ...] = ()
+    unfinished_items: tuple[str, ...] = ()
+    failure_messages: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class LoopGuardResult(SerializableModel):
+    triggered: bool
+    guard_kind: str | None = None
+    reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -70,7 +101,9 @@ class AgentSession(SerializableModel):
     repo_context: RepoContextResult | None = None
     current_plan: AgentPlan | None = None
     prior_artifacts: list[ArtifactRef] = field(default_factory=list)
+    action_history: list[AgentAction] = field(default_factory=list)
     iteration_count: int = 0
     failure_history: list[AgentFailure] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     context_budget: AgentContextBudget | None = None
     created_at: datetime = field(default_factory=utc_now)

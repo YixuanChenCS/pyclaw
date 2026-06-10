@@ -9,6 +9,9 @@ from .models import (
     AgentPlan,
     AgentSession,
     AgentStep,
+    LoopGuardResult,
+    PatchReview,
+    RunSummary,
 )
 from .service import AgentCoreService
 
@@ -23,7 +26,10 @@ __all__ = [
     "AgentSession",
     "AgentStep",
     "LocalAgentCoreService",
+    "LoopGuardResult",
     "ModelClient",
+    "PatchReview",
+    "RunSummary",
 ]
 
 

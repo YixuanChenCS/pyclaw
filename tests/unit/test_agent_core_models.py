@@ -11,6 +11,9 @@ from services.agent_core.models import (
     AgentPlan,
     AgentSession,
     AgentStep,
+    LoopGuardResult,
+    PatchReview,
+    RunSummary,
 )
 
 
@@ -57,8 +60,16 @@ class TestAgentCoreModels(unittest.TestCase):
             repo_context=repo_context,
             current_plan=plan,
             prior_artifacts=[artifact],
+            action_history=[
+                AgentAction(
+                    type=AgentActionType.ASK_CONTEXT,
+                    reason="Need local service context",
+                    requested_context=("services/agent_core/local.py",),
+                )
+            ],
             iteration_count=1,
             failure_history=[failure],
+            warnings=["summary warning"],
             context_budget=budget,
         )
 
@@ -68,7 +79,9 @@ class TestAgentCoreModels(unittest.TestCase):
         self.assertEqual(payload["current_plan"]["steps"][0]["kind"], "inspect")
         self.assertEqual(payload["current_plan"]["steps"][0]["description"], "Inspect services/agent_core")
         self.assertEqual(payload["prior_artifacts"][0]["label"], "prior-summary")
+        self.assertEqual(payload["action_history"][0]["type"], "ask_context")
         self.assertEqual(payload["failure_history"][0]["stage"], "plan")
+        self.assertEqual(payload["warnings"][0], "summary warning")
         self.assertEqual(payload["context_budget"]["remaining_input_tokens"], 6000)
 
     def test_agent_session_uses_safe_mutable_defaults(self):
@@ -83,9 +96,13 @@ class TestAgentCoreModels(unittest.TestCase):
         )
 
         self.assertEqual(first.prior_artifacts, [])
+        self.assertEqual(first.action_history, [])
         self.assertEqual(first.failure_history, [])
+        self.assertEqual(first.warnings, [])
         self.assertIsNot(first.prior_artifacts, second.prior_artifacts)
+        self.assertIsNot(first.action_history, second.action_history)
         self.assertIsNot(first.failure_history, second.failure_history)
+        self.assertIsNot(first.warnings, second.warnings)
 
     def test_agent_action_type_contains_exact_expected_values(self):
         self.assertEqual(
@@ -116,7 +133,9 @@ class TestAgentCoreModels(unittest.TestCase):
             AgentAction(
                 type=AgentActionType.PROPOSE_PATCH,
                 reason="Future patch proposal",
+                target_files=("services/agent_core/local.py",),
                 patch_diff="--- a/file.py\n+++ b/file.py\n",
+                allow_file_deletions=False,
             ),
             AgentAction(
                 type=AgentActionType.REQUEST_APPROVAL,
@@ -138,10 +157,33 @@ class TestAgentCoreModels(unittest.TestCase):
 
         self.assertEqual([action.type for action in actions][0], AgentActionType.ASK_CONTEXT)
         self.assertEqual(actions[1].command_argv, ("pytest", "-q"))
+        self.assertEqual(actions[2].target_files, ("services/agent_core/local.py",))
         self.assertEqual(actions[2].patch_diff, "--- a/file.py\n+++ b/file.py\n")
         self.assertEqual(actions[3].approval_risk_reason, "Writes outside the workspace")
         self.assertEqual(actions[4].summary_text, "Planning complete")
         self.assertEqual(actions[5].type, AgentActionType.COMPLETE)
+
+    def test_phase_f_models_serialize_cleanly(self):
+        review = PatchReview(
+            accepted=True,
+            reason="Patch review passed",
+            changed_files=("services/agent_core/local.py",),
+            patch_diff="--- a/x\n+++ b/x\n",
+        )
+        summary = RunSummary(
+            final_status="completed",
+            completed_steps=("Inspect files",),
+            attempted_actions=("ask_context", "propose_patch"),
+            changed_files=("services/agent_core/local.py",),
+            commands_run=(("python", "-m", "unittest"),),
+            checks_passed=True,
+            warnings=("none",),
+        )
+        guard = LoopGuardResult(triggered=True, guard_kind="max_iterations", reason="stopped")
+
+        self.assertTrue(review.to_dict()["accepted"])
+        self.assertEqual(summary.to_dict()["final_status"], "completed")
+        self.assertEqual(guard.to_dict()["guard_kind"], "max_iterations")
 
 
 if __name__ == "__main__":

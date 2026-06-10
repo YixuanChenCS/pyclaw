@@ -7,7 +7,15 @@ from packages.shared_types import ArtifactRef, RepoContextResult
 from packages.shared_types.ids import RunId, WorkspaceId
 
 from .model_client import ModelClient
-from .models import AgentAction, AgentContextBudget, AgentFailure, AgentPlan, AgentSession
+from .models import (
+    AgentAction,
+    AgentContextBudget,
+    AgentFailure,
+    AgentPlan,
+    AgentSession,
+    PatchReview,
+    RunSummary,
+)
 
 
 class AgentCoreService(ABC):
@@ -23,8 +31,10 @@ class AgentCoreService(ABC):
         repo_context: RepoContextResult | None = None,
         current_plan: AgentPlan | None = None,
         prior_artifacts: Sequence[ArtifactRef] = (),
+        action_history: Sequence[AgentAction] = (),
         iteration_count: int = 0,
         failure_history: Sequence[AgentFailure] = (),
+        warnings: Sequence[str] = (),
         context_budget: AgentContextBudget | None = None,
     ) -> AgentSession:
         """Construct deterministic session state for a run."""
@@ -47,9 +57,9 @@ class AgentCoreService(ABC):
         self,
         session: AgentSession,
         proposed_action: AgentAction,
-    ) -> AgentAction:
+    ) -> PatchReview:
         """Review or refine a proposed patch action."""
 
     @abstractmethod
-    async def summarize_run(self, session: AgentSession) -> AgentAction:
+    async def summarize_run(self, session: AgentSession) -> RunSummary:
         """Produce the final structured summary/completion action."""

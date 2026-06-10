@@ -125,6 +125,56 @@ class TestAgentCorePlan(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("may not exceed", str(context.exception).lower())
 
+    async def test_create_plan_rejects_non_object_json_payload(self):
+        # Verifies that create_plan requires a JSON object at the top level.
+        # This catches permissive parsing that would accept arbitrary JSON shapes as plans.
+        # Rejection is correct because the planner contract explicitly requires an object with goal and steps.
+        service, session = self._make_session(responses=['["not", "a", "plan"]'])
+
+        with self.assertRaises(AgentPlanValidationError) as context:
+            await service.create_plan(session)
+
+        self.assertIn("json object", str(context.exception).lower())
+
+    async def test_create_plan_rejects_invalid_target_files_type(self):
+        # Verifies that target_files must be a sequence of file paths, not a bare string.
+        # This catches broken schema validation that would silently treat a string as iterable file names.
+        # Rejection is correct because each plan step must carry normalized file paths or no targets at all.
+        service, session = self._make_session(
+            responses=[
+                '{"goal":"Plan","steps":[{"kind":"inspect","description":"Inspect file","target_files":"services/agent_core/local.py"}]}'
+            ]
+        )
+
+        with self.assertRaises(AgentPlanValidationError) as context:
+            await service.create_plan(session)
+
+        self.assertIn("target_files", str(context.exception).lower())
+
+    async def test_create_plan_rejects_invalid_rationale_type(self):
+        # Verifies that rationale must be a non-empty string when present.
+        # This catches model-output coercion bugs that would accept numbers or other invalid metadata.
+        # Rejection is correct because rationale is optional text, not an arbitrary JSON value.
+        service, session = self._make_session(
+            responses=[
+                '{"goal":"Plan","steps":[{"kind":"inspect","description":"Inspect file","rationale":3}]}'
+            ]
+        )
+
+        with self.assertRaises(AgentPlanValidationError) as context:
+            await service.create_plan(session)
+
+        self.assertIn("rationale", str(context.exception).lower())
+
+    async def test_create_plan_rejects_non_mapping_model_response(self):
+        # Verifies that the model client must return either a JSON string or a mapping.
+        # This catches accidental adapter regressions that return unsupported response objects.
+        # Rejection is correct because create_plan cannot deterministically parse arbitrary Python objects.
+        service, session = self._make_session(responses=[123])
+
+        with self.assertRaises(TypeError):
+            await service.create_plan(session)
+
 
 if __name__ == "__main__":
     unittest.main()

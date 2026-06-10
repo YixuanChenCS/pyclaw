@@ -1,14 +1,22 @@
 from __future__ import annotations
 
 import json
+from pathlib import PurePosixPath
 from typing import Mapping, Sequence
 
-from .models import AgentActionType, AgentSession
+from packages.shared_types import TaskStatus
+
+from .models import AgentAction, AgentActionType, AgentSession, LoopGuardResult
 
 VALID_PLAN_STEP_KINDS = frozenset(
     {"inspect", "patch", "command", "approval", "summarize", "complete"}
 )
 MAX_AGENT_PLAN_STEPS = 8
+MAX_AGENT_ITERATIONS = 12
+MAX_REPEATED_ACTIONS = 3
+MAX_REPEATED_COMMAND_FAILURES = 2
+MAX_REPEATED_PATCH_REVIEW_FAILURES = 2
+MAX_NO_PROGRESS_ITERATIONS = 3
 
 
 class AgentCoreValidationError(ValueError):
@@ -17,6 +25,10 @@ class AgentCoreValidationError(ValueError):
 
 class AgentPlanValidationError(AgentCoreValidationError):
     """Raised when a model-produced plan is malformed or unsupported."""
+
+
+class AgentStateValidationError(AgentCoreValidationError):
+    """Raised when session state is inconsistent for deterministic action selection."""
 
 
 def validate_action_type(action_type: AgentActionType | str) -> AgentActionType:
@@ -38,6 +50,164 @@ def validate_session_basic_shape(session: AgentSession) -> None:
         raise ValueError("AgentSession.user_request must be non-empty")
     if session.iteration_count < 0:
         raise ValueError("AgentSession.iteration_count must be non-negative")
+
+
+def validate_next_action_session(session: AgentSession) -> None:
+    validate_session_basic_shape(session)
+
+    plan = session.current_plan
+    if plan is None:
+        raise AgentStateValidationError("AgentSession.current_plan must be set for next_action")
+    if not plan.goal.strip():
+        raise AgentStateValidationError("AgentSession.current_plan.goal must be non-empty")
+    if not plan.steps:
+        raise AgentStateValidationError("AgentSession.current_plan.steps must be non-empty")
+
+    running_steps = 0
+    first_pending_seen = False
+    for index, step in enumerate(plan.steps, start=1):
+        if not isinstance(step.kind, str) or not step.kind.strip():
+            raise AgentStateValidationError(f"Plan step {index} must include a non-empty kind")
+
+        kind = step.kind.strip().lower()
+        if kind not in VALID_PLAN_STEP_KINDS:
+            raise AgentStateValidationError(f"Plan step {index} has unsupported kind {kind!r}")
+
+        if not isinstance(step.description, str) or not step.description.strip():
+            raise AgentStateValidationError(
+                f"Plan step {index} must include a non-empty description"
+            )
+
+        if not isinstance(step.status, TaskStatus):
+            raise AgentStateValidationError(f"Plan step {index} has invalid status {step.status!r}")
+
+        for path_index, path in enumerate(step.target_files, start=1):
+            if not isinstance(path, str) or not path.strip():
+                raise AgentStateValidationError(
+                    f"Plan step {index} target_files[{path_index}] must be a non-empty string"
+                )
+
+        if kind == "patch" and not step.target_files:
+            raise AgentStateValidationError(
+                f"Plan step {index} kind 'patch' requires at least one target file"
+            )
+
+        if step.status == TaskStatus.RUNNING:
+            running_steps += 1
+        elif step.status == TaskStatus.PENDING:
+            first_pending_seen = True
+        elif first_pending_seen and step.status == TaskStatus.SUCCEEDED:
+            raise AgentStateValidationError(
+                f"Plan step {index} cannot be succeeded after a pending step"
+            )
+
+    if running_steps:
+        raise AgentStateValidationError("next_action cannot run while a plan step is already running")
+
+
+def validate_review_patch_action(proposed_action: AgentAction) -> None:
+    if proposed_action.type != AgentActionType.PROPOSE_PATCH:
+        raise AgentStateValidationError("review_patch requires a propose_patch action")
+    if proposed_action.patch_diff is None or not proposed_action.patch_diff.strip():
+        raise AgentStateValidationError("Patch proposal must include a non-empty patch_diff")
+
+
+def extract_patch_changed_files(patch_diff: str) -> tuple[tuple[str, bool], ...]:
+    lines = patch_diff.splitlines()
+    pairs: list[tuple[str, str]] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if line.startswith("--- "):
+            if index + 1 >= len(lines) or not lines[index + 1].startswith("+++ "):
+                raise AgentStateValidationError("Patch diff must contain matching ---/+++ headers")
+            old_path = _normalize_patch_header_path(line[4:].strip())
+            new_path = _normalize_patch_header_path(lines[index + 1][4:].strip())
+            pairs.append((old_path, new_path))
+            index += 2
+            continue
+        index += 1
+
+    if not pairs:
+        raise AgentStateValidationError("Patch diff must contain at least one file header pair")
+
+    changed_files: list[tuple[str, bool]] = []
+    for old_path, new_path in pairs:
+        deleted = new_path == "/dev/null"
+        changed_path = old_path if deleted else new_path
+        if changed_path == "/dev/null":
+            raise AgentStateValidationError("Patch diff may not use /dev/null for both file headers")
+        validate_workspace_relative_path(changed_path)
+        changed_files.append((changed_path, deleted))
+
+    return tuple(changed_files)
+
+
+def validate_workspace_relative_path(path: str) -> None:
+    if not path.strip():
+        raise AgentStateValidationError("Patch path may not be empty")
+    pure_path = PurePosixPath(path)
+    if pure_path.is_absolute():
+        raise AgentStateValidationError(f"Patch path must be workspace-relative: {path!r}")
+    if any(part == ".." for part in pure_path.parts):
+        raise AgentStateValidationError(f"Patch path may not escape the workspace: {path!r}")
+    if path.startswith("~"):
+        raise AgentStateValidationError(f"Patch path may not be home-relative: {path!r}")
+
+
+def evaluate_loop_guard(session: AgentSession) -> LoopGuardResult:
+    validate_session_basic_shape(session)
+
+    if session.iteration_count >= MAX_AGENT_ITERATIONS:
+        return LoopGuardResult(
+            triggered=True,
+            guard_kind="max_iterations",
+            reason=f"Iteration limit exceeded ({session.iteration_count} >= {MAX_AGENT_ITERATIONS})",
+        )
+
+    if _remaining_context_exhausted(session):
+        return LoopGuardResult(
+            triggered=True,
+            guard_kind="context_overflow",
+            reason="Context budget is exhausted",
+        )
+
+    if _has_repeated_action(session.action_history):
+        return LoopGuardResult(
+            triggered=True,
+            guard_kind="repeated_action",
+            reason="The same action has been repeated too many times",
+        )
+
+    if _count_consecutive_failures(session.failure_history, "command") >= MAX_REPEATED_COMMAND_FAILURES:
+        return LoopGuardResult(
+            triggered=True,
+            guard_kind="repeated_command_failures",
+            reason="Command failures repeated without recovery",
+        )
+
+    if _count_consecutive_failures(session.failure_history, "review_patch") >= MAX_REPEATED_PATCH_REVIEW_FAILURES:
+        return LoopGuardResult(
+            triggered=True,
+            guard_kind="repeated_patch_review_failures",
+            reason="Patch review failures repeated without recovery",
+        )
+
+    plan = session.current_plan
+    if (
+        plan is not None
+        and session.iteration_count >= MAX_NO_PROGRESS_ITERATIONS
+        and len(session.action_history) >= MAX_NO_PROGRESS_ITERATIONS
+        and not any(step.status == TaskStatus.SUCCEEDED for step in plan.steps)
+        and any(step.status == TaskStatus.PENDING for step in plan.steps)
+    ):
+        return LoopGuardResult(
+            triggered=True,
+            guard_kind="no_progress",
+            reason="No plan-step progress has been made across recent iterations",
+        )
+
+    return LoopGuardResult(triggered=False)
 
 
 def parse_json_object(text: str) -> Mapping[str, object]:
@@ -137,3 +307,50 @@ def validate_plan_payload(payload: Mapping[str, object]) -> dict[str, object]:
         "steps": normalized_steps,
         "summary": summary,
     }
+
+
+def _normalize_patch_header_path(raw_path: str) -> str:
+    path = raw_path.split("\t", 1)[0].strip()
+    if path in {"/dev/null"}:
+        return path
+    if path.startswith("a/") or path.startswith("b/"):
+        return path[2:]
+    return path
+
+
+def _remaining_context_exhausted(session: AgentSession) -> bool:
+    budget = session.context_budget
+    if budget is None:
+        return False
+    return any(
+        remaining is not None and remaining <= 0
+        for remaining in (budget.remaining_input_tokens, budget.remaining_output_tokens)
+    )
+
+
+def _has_repeated_action(action_history: Sequence[AgentAction]) -> bool:
+    if len(action_history) < MAX_REPEATED_ACTIONS:
+        return False
+    recent = action_history[-MAX_REPEATED_ACTIONS:]
+    signature = _action_signature(recent[0])
+    return all(_action_signature(action) == signature for action in recent[1:])
+
+
+def _action_signature(action: AgentAction) -> tuple[object, ...]:
+    return (
+        action.type.value,
+        action.reason,
+        action.target_files,
+        action.command_argv,
+        action.requested_context,
+        action.allow_file_deletions,
+    )
+
+
+def _count_consecutive_failures(failures: Sequence[object], stage: str) -> int:
+    count = 0
+    for failure in reversed(failures):
+        if getattr(failure, "stage", None) != stage:
+            break
+        count += 1
+    return count
