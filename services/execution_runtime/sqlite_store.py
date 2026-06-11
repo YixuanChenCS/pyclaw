@@ -9,6 +9,7 @@ import sqlite3
 from typing import Iterator, Mapping, Sequence
 
 from packages.shared_types import (
+    ApprovalDecision,
     ApprovalRequest,
     ApprovalId,
     Artifact,
@@ -18,6 +19,9 @@ from packages.shared_types import (
     EventId,
     EventType,
     JSONValue,
+    RecoveryOption,
+    RecoveryState,
+    RecoveryStatus,
     Run,
     RunEvent,
     RunId,
@@ -29,6 +33,12 @@ from packages.shared_types import (
     build_run_event,
     build_run_status_event,
     utc_now,
+)
+from services.agent_core.models import AgentSession
+from services.agent_core.session_store import (
+    AGENT_SESSION_SCHEMA_VERSION,
+    deserialize_agent_session_json,
+    serialize_agent_session,
 )
 
 from .events import json_dumps, json_loads, parse_datetime, run_status_event_type, serialize_datetime
@@ -146,6 +156,47 @@ class SQLiteExecutionRuntimeRepository:
     async def list_approval_requests(self, run_id: RunId | str) -> tuple[ApprovalRequest, ...]:
         return await asyncio.to_thread(self._list_approval_requests_sync, RunId(str(run_id)))
 
+    async def update_approval_decision(self, decision: ApprovalDecision) -> None:
+        await asyncio.to_thread(self._update_approval_decision_sync, decision)
+
+    async def save_patch_snapshot(
+        self,
+        *,
+        run_id: RunId | str,
+        task_id: TaskId | str,
+        relative_path: str,
+        existed_before: bool,
+        content: str | None,
+    ) -> None:
+        await asyncio.to_thread(
+            self._save_patch_snapshot_sync,
+            RunId(str(run_id)),
+            TaskId(str(task_id)),
+            relative_path,
+            existed_before,
+            content,
+        )
+
+    async def list_patch_snapshots(
+        self,
+        run_id: RunId | str,
+        task_id: TaskId | str,
+    ) -> tuple[dict[str, object], ...]:
+        return await asyncio.to_thread(
+            self._list_patch_snapshots_sync,
+            RunId(str(run_id)),
+            TaskId(str(task_id)),
+        )
+
+    async def upsert_recovery_status(self, recovery: RecoveryStatus) -> None:
+        await asyncio.to_thread(self._upsert_recovery_status_sync, recovery)
+
+    async def get_recovery_status(self, run_id: RunId | str) -> RecoveryStatus | None:
+        return await asyncio.to_thread(self._get_recovery_status_sync, RunId(str(run_id)))
+
+    async def clear_recovery_status(self, run_id: RunId | str) -> None:
+        await asyncio.to_thread(self._clear_recovery_status_sync, RunId(str(run_id)))
+
     def _initialize(self) -> None:
         connection = self._connect()
         try:
@@ -212,16 +263,57 @@ class SQLiteExecutionRuntimeRepository:
                     FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
                 );
 
+                CREATE TABLE IF NOT EXISTS agent_sessions (
+                    run_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL,
+                    session_json TEXT NOT NULL,
+                    schema_version INTEGER NOT NULL,
+                    revision INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS patch_snapshots (
+                    run_id TEXT NOT NULL,
+                    task_id TEXT NOT NULL,
+                    relative_path TEXT NOT NULL,
+                    existed_before INTEGER NOT NULL,
+                    content TEXT,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (run_id, task_id, relative_path)
+                );
+
+                CREATE TABLE IF NOT EXISTS recovery_states (
+                    run_id TEXT PRIMARY KEY,
+                    task_id TEXT,
+                    recovery_state TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    recovery_options_json TEXT NOT NULL,
+                    rollback_task_id TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_runs_status_created
                     ON runs(status, created_at);
                 CREATE INDEX IF NOT EXISTS idx_runs_status_lease
                     ON runs(status, lease_expires_at);
                 CREATE INDEX IF NOT EXISTS idx_run_events_sequence
                     ON run_events(run_id, sequence);
+                CREATE INDEX IF NOT EXISTS idx_agent_sessions_workspace
+                    ON agent_sessions(workspace_id, updated_at);
+                CREATE INDEX IF NOT EXISTS idx_patch_snapshots_task
+                    ON patch_snapshots(run_id, task_id);
                 """
             )
         finally:
             connection.close()
+
+    async def save_agent_session(self, session: AgentSession) -> None:
+        await asyncio.to_thread(self._save_agent_session_sync, session)
+
+    async def load_agent_session(self, run_id: RunId | str) -> AgentSession | None:
+        return await asyncio.to_thread(self._load_agent_session_sync, RunId(str(run_id)))
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(
@@ -445,37 +537,38 @@ class SQLiteExecutionRuntimeRepository:
                     current.run_id,
                 )
                 if side_effect_event_types:
-                    approval_request = ApprovalRequest(
+                    recovery = self._build_stale_recovery_status(
+                        connection,
                         run_id=current.run_id,
-                        reason=(
-                            "Manual recovery required because the worker lease expired after side effects."
-                        ),
+                        reason="Manual recovery required because the worker lease expired after side effects.",
                         created_at=now,
                     )
                     recovered = replace(
                         current,
-                        status=RunStatus.WAITING_FOR_APPROVAL,
+                        status=RunStatus.NEEDS_RECOVERY,
                         worker_id=None,
                         lease_expires_at=None,
                         last_heartbeat_at=None,
                         updated_at=now,
                     )
                     self._update_run_row(connection, recovered)
-                    self._insert_approval_request(connection, approval_request)
+                    self._upsert_recovery_status_in_tx(connection, recovery)
                     self._append_event_with_sequence_in_tx(
                         connection,
                         recovered.run_id,
                         build_run_event(
                             run_id=recovered.run_id,
-                            event_type=EventType.APPROVAL_REQUESTED,
-                            message=approval_request.reason,
-                            run_status=RunStatus.WAITING_FOR_APPROVAL,
-                            approval_id=approval_request.approval_id,
+                            event_type=EventType.RUN_NEEDS_RECOVERY,
+                            message=recovery.reason,
+                            run_status=RunStatus.NEEDS_RECOVERY,
+                            task_id=recovery.task_id,
                             payload={
                                 "kind": "manual_recovery",
                                 "recovered_from_status": current.status.value,
                                 "previous_worker_id": current.worker_id,
                                 "attempt": current.attempt,
+                                "recovery_state": recovery.recovery_state.value,
+                                "recovery_options": [option.value for option in recovery.recovery_options],
                             },
                         ),
                     )
@@ -488,11 +581,12 @@ class SQLiteExecutionRuntimeRepository:
                             message=(
                                 "Worker lease expired after side effects; run requires manual recovery."
                             ),
-                            run_status=RunStatus.WAITING_FOR_APPROVAL,
-                            approval_id=approval_request.approval_id,
+                            run_status=RunStatus.NEEDS_RECOVERY,
+                            task_id=recovery.task_id,
                             payload={
                                 "kind": "manual_recovery_required",
                                 "side_effect_event_types": sorted(side_effect_event_types),
+                                "recovery_state": recovery.recovery_state.value,
                             },
                         ),
                     )
@@ -608,6 +702,224 @@ class SQLiteExecutionRuntimeRepository:
             connection.close()
         return tuple(self._approval_request_from_row(row) for row in rows)
 
+    def _update_approval_decision_sync(self, decision: ApprovalDecision) -> None:
+        with self._transaction("IMMEDIATE") as connection:
+            approval_row = connection.execute(
+                """
+                SELECT *
+                FROM approvals
+                WHERE approval_id = ?
+                """,
+                (str(decision.approval_id),),
+            ).fetchone()
+            if approval_row is None:
+                raise EntityNotFoundError("approval", str(decision.approval_id))
+
+            if str(approval_row["run_id"]) != str(decision.run_id):
+                raise ValueError("ApprovalDecision.run_id must match the persisted approval run_id")
+
+            if approval_row["approved"] is not None:
+                approved_value = bool(int(approval_row["approved"]))
+                if (
+                    approved_value == decision.approved
+                    and approval_row["reviewer"] == decision.reviewer
+                    and approval_row["comment"] == decision.comment
+                ):
+                    return
+                raise ValueError(
+                    f"Approval {decision.approval_id} has already been decided and cannot be overwritten"
+                )
+
+            connection.execute(
+                """
+                UPDATE approvals
+                SET approved = ?, decided_at = ?, reviewer = ?, comment = ?
+                WHERE approval_id = ?
+                """,
+                (
+                    1 if decision.approved else 0,
+                    serialize_datetime(decision.decided_at),
+                    decision.reviewer,
+                    decision.comment,
+                    str(decision.approval_id),
+                ),
+            )
+
+            run = self._run_from_row(self._select_run_for_update(connection, decision.run_id))
+            self._append_event_with_sequence_in_tx(
+                connection,
+                run.run_id,
+                build_run_event(
+                    run_id=run.run_id,
+                    event_type=EventType.APPROVAL_RESOLVED,
+                    run_status=run.status,
+                    approval_id=decision.approval_id,
+                    task_id=TaskId(str(approval_row["task_id"])) if approval_row["task_id"] is not None else None,
+                    message="Approval granted" if decision.approved else "Approval denied",
+                    payload={
+                        "approved": decision.approved,
+                        "reviewer": decision.reviewer,
+                        "comment": decision.comment,
+                    },
+                ),
+            )
+
+    def _save_agent_session_sync(self, session: AgentSession) -> None:
+        now = utc_now()
+        serialized = serialize_agent_session(session)
+        with self._transaction("IMMEDIATE") as connection:
+            existing = connection.execute(
+                """
+                SELECT revision, created_at
+                FROM agent_sessions
+                WHERE run_id = ?
+                """,
+                (str(session.run_id),),
+            ).fetchone()
+
+            if existing is None:
+                connection.execute(
+                    """
+                    INSERT INTO agent_sessions (
+                        run_id, workspace_id, session_json, schema_version, revision, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(session.run_id),
+                        str(session.workspace_id),
+                        serialized,
+                        AGENT_SESSION_SCHEMA_VERSION,
+                        1,
+                        serialize_datetime(now),
+                        serialize_datetime(now),
+                    ),
+                )
+                return
+
+            connection.execute(
+                """
+                UPDATE agent_sessions
+                SET workspace_id = ?, session_json = ?, schema_version = ?, revision = ?, updated_at = ?
+                WHERE run_id = ?
+                """,
+                (
+                    str(session.workspace_id),
+                    serialized,
+                    AGENT_SESSION_SCHEMA_VERSION,
+                    int(existing["revision"]) + 1,
+                    serialize_datetime(now),
+                    str(session.run_id),
+                ),
+            )
+
+    def _load_agent_session_sync(self, run_id: RunId) -> AgentSession | None:
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                """
+                SELECT session_json, schema_version
+                FROM agent_sessions
+                WHERE run_id = ?
+                """,
+                (str(run_id),),
+            ).fetchone()
+        finally:
+            connection.close()
+
+        if row is None:
+            return None
+
+        return deserialize_agent_session_json(
+            row["session_json"],
+            schema_version=int(row["schema_version"]),
+        )
+
+    def _save_patch_snapshot_sync(
+        self,
+        run_id: RunId,
+        task_id: TaskId,
+        relative_path: str,
+        existed_before: bool,
+        content: str | None,
+    ) -> None:
+        with self._transaction("IMMEDIATE") as connection:
+            connection.execute(
+                """
+                INSERT INTO patch_snapshots (
+                    run_id, task_id, relative_path, existed_before, content, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(run_id, task_id, relative_path) DO UPDATE SET
+                    existed_before = excluded.existed_before,
+                    content = excluded.content
+                """,
+                (
+                    str(run_id),
+                    str(task_id),
+                    relative_path,
+                    1 if existed_before else 0,
+                    content,
+                    serialize_datetime(utc_now()),
+                ),
+            )
+
+    def _list_patch_snapshots_sync(
+        self,
+        run_id: RunId,
+        task_id: TaskId,
+    ) -> tuple[dict[str, object], ...]:
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                """
+                SELECT relative_path, existed_before, content, created_at
+                FROM patch_snapshots
+                WHERE run_id = ? AND task_id = ?
+                ORDER BY relative_path ASC
+                """,
+                (str(run_id), str(task_id)),
+            ).fetchall()
+        finally:
+            connection.close()
+
+        return tuple(
+            {
+                "relative_path": str(row["relative_path"]),
+                "existed_before": bool(int(row["existed_before"])),
+                "content": row["content"],
+                "created_at": parse_datetime(row["created_at"]) or utc_now(),
+            }
+            for row in rows
+        )
+
+    def _upsert_recovery_status_sync(self, recovery: RecoveryStatus) -> None:
+        with self._transaction("IMMEDIATE") as connection:
+            self._upsert_recovery_status_in_tx(connection, recovery)
+
+    def _get_recovery_status_sync(self, run_id: RunId) -> RecoveryStatus | None:
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                """
+                SELECT *
+                FROM recovery_states
+                WHERE run_id = ?
+                """,
+                (str(run_id),),
+            ).fetchone()
+        finally:
+            connection.close()
+
+        if row is None:
+            return None
+        return self._recovery_status_from_row(row)
+
+    def _clear_recovery_status_sync(self, run_id: RunId) -> None:
+        with self._transaction("IMMEDIATE") as connection:
+            connection.execute(
+                "DELETE FROM recovery_states WHERE run_id = ?",
+                (str(run_id),),
+            )
+
     def _insert_run(self, connection: sqlite3.Connection, run: Run) -> None:
         connection.execute(
             """
@@ -694,6 +1006,89 @@ class SQLiteExecutionRuntimeRepository:
             ),
         )
 
+    def _upsert_recovery_status_in_tx(
+        self,
+        connection: sqlite3.Connection,
+        recovery: RecoveryStatus,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO recovery_states (
+                run_id, task_id, recovery_state, reason, recovery_options_json,
+                rollback_task_id, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(run_id) DO UPDATE SET
+                task_id = excluded.task_id,
+                recovery_state = excluded.recovery_state,
+                reason = excluded.reason,
+                recovery_options_json = excluded.recovery_options_json,
+                rollback_task_id = excluded.rollback_task_id,
+                updated_at = excluded.updated_at
+            """,
+            (
+                str(recovery.run_id),
+                str(recovery.task_id) if recovery.task_id is not None else None,
+                recovery.recovery_state.value,
+                recovery.reason,
+                json_dumps({"recovery_options": [item.value for item in recovery.recovery_options]}),
+                str(recovery.rollback_task_id) if recovery.rollback_task_id is not None else None,
+                serialize_datetime(recovery.created_at),
+                serialize_datetime(recovery.updated_at),
+            ),
+        )
+
+    def _build_stale_recovery_status(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        run_id: RunId,
+        reason: str,
+        created_at: datetime,
+    ) -> RecoveryStatus:
+        rollback_task_id = self._latest_snapshot_task_id(connection, run_id)
+        if rollback_task_id is not None:
+            state = RecoveryState.ROLLBACK_AVAILABLE
+            options = (
+                RecoveryOption.ROLLBACK_IF_AVAILABLE,
+                RecoveryOption.REVIEW_MANUALLY,
+                RecoveryOption.ABORT,
+            )
+        else:
+            state = RecoveryState.NEEDS_RECOVERY
+            options = (
+                RecoveryOption.REVIEW_MANUALLY,
+                RecoveryOption.ABORT,
+            )
+        return RecoveryStatus(
+            run_id=run_id,
+            task_id=rollback_task_id,
+            recovery_state=state,
+            reason=reason,
+            recovery_options=options,
+            rollback_task_id=rollback_task_id,
+            created_at=created_at,
+            updated_at=created_at,
+        )
+
+    def _latest_snapshot_task_id(
+        self,
+        connection: sqlite3.Connection,
+        run_id: RunId,
+    ) -> TaskId | None:
+        row = connection.execute(
+            """
+            SELECT task_id
+            FROM patch_snapshots
+            WHERE run_id = ?
+            ORDER BY created_at DESC, task_id DESC
+            LIMIT 1
+            """,
+            (str(run_id),),
+        ).fetchone()
+        if row is None or row["task_id"] is None:
+            return None
+        return TaskId(str(row["task_id"]))
+
     def _side_effect_events_since_last_start(
         self,
         connection: sqlite3.Connection,
@@ -710,18 +1105,25 @@ class SQLiteExecutionRuntimeRepository:
         last_started_sequence = int(last_started_row["max_sequence"])
         rows = connection.execute(
             """
-            SELECT event_type
+            SELECT event_type, payload_json
             FROM run_events
             WHERE run_id = ? AND sequence > ?
             ORDER BY sequence ASC
             """,
             (str(run_id), last_started_sequence),
         ).fetchall()
-        return {
-            row["event_type"]
-            for row in rows
-            if row["event_type"] in {event_type.value for event_type in _RECOVERY_SIDE_EFFECT_EVENT_TYPES}
-        }
+        side_effects: set[str] = set()
+        for row in rows:
+            event_type = row["event_type"]
+            if event_type in {item.value for item in _RECOVERY_SIDE_EFFECT_EVENT_TYPES}:
+                side_effects.add(event_type)
+                continue
+            if event_type != EventType.AGENT_MESSAGE.value:
+                continue
+            payload = json_loads(row["payload_json"])
+            if isinstance(payload, Mapping) and payload.get("kind") == "patch.started":
+                side_effects.add("patch.started")
+        return side_effects
 
     def _append_event_with_sequence_in_tx(
         self,
@@ -820,6 +1222,22 @@ class SQLiteExecutionRuntimeRepository:
             command_argv=tuple(str(item) for item in command_argv),
             created_at=parse_datetime(row["created_at"]) or utc_now(),
             expires_at=parse_datetime(row["expires_at"]),
+        )
+
+    def _recovery_status_from_row(self, row: sqlite3.Row) -> RecoveryStatus:
+        payload = json_loads(row["recovery_options_json"])
+        raw_options = payload.get("recovery_options", [])
+        if not isinstance(raw_options, list):
+            raw_options = []
+        return RecoveryStatus(
+            run_id=RunId(row["run_id"]),
+            task_id=TaskId(row["task_id"]) if row["task_id"] else None,
+            recovery_state=RecoveryState(row["recovery_state"]),
+            reason=row["reason"],
+            recovery_options=tuple(RecoveryOption(str(item)) for item in raw_options),
+            rollback_task_id=TaskId(row["rollback_task_id"]) if row["rollback_task_id"] else None,
+            created_at=parse_datetime(row["created_at"]) or utc_now(),
+            updated_at=parse_datetime(row["updated_at"]) or utc_now(),
         )
 
 

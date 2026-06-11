@@ -10,6 +10,7 @@ from services.agent_core.models import (
     AgentFailure,
     AgentPlan,
     AgentSession,
+    AgentSessionPhase,
     AgentStep,
     LoopGuardResult,
     PatchReview,
@@ -36,6 +37,7 @@ class TestAgentCoreModels(unittest.TestCase):
                 AgentStep(
                     kind="inspect",
                     description="Inspect services/agent_core",
+                    step_id="step_1",
                     target_files=("services/agent_core/local.py",),
                     rationale="Understand the current local service boundary",
                     status=TaskStatus.PENDING,
@@ -57,6 +59,7 @@ class TestAgentCoreModels(unittest.TestCase):
             run_id=run_id,
             workspace_id=workspace_id,
             user_request="Implement the headless agent core skeleton",
+            phase=AgentSessionPhase.EXECUTING,
             repo_context=repo_context,
             current_plan=plan,
             prior_artifacts=[artifact],
@@ -64,6 +67,7 @@ class TestAgentCoreModels(unittest.TestCase):
                 AgentAction(
                     type=AgentActionType.ASK_CONTEXT,
                     reason="Need local service context",
+                    step_id="step_1",
                     requested_context=("services/agent_core/local.py",),
                 )
             ],
@@ -75,11 +79,14 @@ class TestAgentCoreModels(unittest.TestCase):
 
         payload = session.to_dict()
         self.assertEqual(payload["user_request"], "Implement the headless agent core skeleton")
+        self.assertEqual(payload["phase"], "executing")
         self.assertEqual(payload["current_plan"]["goal"], "Create a headless agent-core plan")
         self.assertEqual(payload["current_plan"]["steps"][0]["kind"], "inspect")
+        self.assertEqual(payload["current_plan"]["steps"][0]["step_id"], "step_1")
         self.assertEqual(payload["current_plan"]["steps"][0]["description"], "Inspect services/agent_core")
         self.assertEqual(payload["prior_artifacts"][0]["label"], "prior-summary")
         self.assertEqual(payload["action_history"][0]["type"], "ask_context")
+        self.assertEqual(payload["action_history"][0]["step_id"], "step_1")
         self.assertEqual(payload["failure_history"][0]["stage"], "plan")
         self.assertEqual(payload["warnings"][0], "summary warning")
         self.assertEqual(payload["context_budget"]["remaining_input_tokens"], 6000)
@@ -103,6 +110,21 @@ class TestAgentCoreModels(unittest.TestCase):
         self.assertIsNot(first.action_history, second.action_history)
         self.assertIsNot(first.failure_history, second.failure_history)
         self.assertIsNot(first.warnings, second.warnings)
+
+    def test_agent_session_phase_contains_expected_values(self):
+        self.assertEqual(
+            {phase.value for phase in AgentSessionPhase},
+            {
+                "planning",
+                "ready",
+                "executing",
+                "awaiting_context",
+                "awaiting_approval",
+                "needs_recovery",
+                "completed",
+                "failed",
+            },
+        )
 
     def test_agent_action_type_contains_exact_expected_values(self):
         self.assertEqual(

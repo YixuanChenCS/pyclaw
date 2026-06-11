@@ -74,6 +74,36 @@ class TestAgentCoreLoopGuards(unittest.TestCase):
         self.assertTrue(result.triggered)
         self.assertEqual(result.guard_kind, "repeated_action")
 
+    def test_loop_guard_triggers_on_repeated_context_requests(self):
+        # Verifies that repeated ASK_CONTEXT turns are capped even when the requested files differ.
+        # This catches the loop where the agent keeps asking for more context instead of incorporating it.
+        # Triggering is correct because three consecutive context requests indicate stalled context acquisition.
+        session = self._make_session(
+            action_history=[
+                AgentAction(
+                    type=AgentActionType.ASK_CONTEXT,
+                    reason="Inspect service",
+                    requested_context=("services/agent_core/local.py",),
+                ),
+                AgentAction(
+                    type=AgentActionType.ASK_CONTEXT,
+                    reason="Inspect tests",
+                    requested_context=("tests/unit/test_agent_core_runner.py",),
+                ),
+                AgentAction(
+                    type=AgentActionType.ASK_CONTEXT,
+                    reason="Inspect runtime",
+                    requested_context=("services/execution_runtime/local.py",),
+                ),
+            ],
+            iteration_count=2,
+        )
+
+        result = evaluate_loop_guard(session)
+
+        self.assertTrue(result.triggered)
+        self.assertEqual(result.guard_kind, "repeated_context_requests")
+
     def test_loop_guard_triggers_on_repeated_patch_review_failures(self):
         # Verifies that consecutive review failures stop the loop instead of allowing repeated bad patches.
         # This catches retry storms where invalid patch proposals keep being recycled.

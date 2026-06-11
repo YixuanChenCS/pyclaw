@@ -7,23 +7,29 @@ from .models import (
     AgentContextBudget,
     AgentFailure,
     AgentPlan,
+    AgentRunOutcome,
     AgentSession,
+    AgentSessionPhase,
     AgentStep,
     LoopGuardResult,
     PatchReview,
     RunSummary,
 )
+from .runner import AgentCoreCoordinator
 from .service import AgentCoreService
 
 __all__ = [
     "AgentAction",
     "AgentActionType",
     "AgentContextBudget",
+    "AgentCoreCoordinator",
     "AgentCoreService",
     "AgentFailure",
     "FakeModelClient",
     "AgentPlan",
+    "AgentRunOutcome",
     "AgentSession",
+    "AgentSessionPhase",
     "AgentStep",
     "LocalAgentCoreService",
     "LoopGuardResult",

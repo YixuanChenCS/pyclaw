@@ -6,7 +6,7 @@ from enum import Enum
 import json
 from typing import Any, Mapping, Sequence, Union
 
-from .enums import ArtifactType, EventType, RunStatus, TaskStatus
+from .enums import ArtifactType, EventType, RecoveryOption, RecoveryState, RunStatus, TaskStatus
 from .errors import ContractSerializationError
 from .ids import (
     ApprovalId,
@@ -260,6 +260,18 @@ class ApprovalDecision(SerializableModel):
     decided_at: datetime = field(default_factory=utc_now)
     reviewer: str | None = None
     comment: str | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RecoveryStatus(SerializableModel):
+    run_id: RunId
+    recovery_state: RecoveryState
+    reason: str
+    task_id: TaskId | None = None
+    recovery_options: tuple[RecoveryOption, ...] = ()
+    rollback_task_id: TaskId | None = None
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

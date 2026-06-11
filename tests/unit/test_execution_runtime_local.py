@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 from packages.shared_types import (
+    ApprovalDecision,
     ApprovalRequest,
     ArtifactType,
     EntityNotFoundError,
@@ -17,6 +18,9 @@ from packages.shared_types import (
     InvalidRunStateError,
     CommandRequest,
     PatchProposal,
+    RecoveryOption,
+    RecoveryState,
+    RecoveryStatus,
     RunRequest,
     RunResult,
     RunStatus,
@@ -351,7 +355,10 @@ class TestLocalExecutionRuntimeService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(events[-1].event_type, EventType.RUN_QUEUED)
             self.assertEqual(events[-1].run_status, RunStatus.QUEUED)
 
-    async def test_stale_running_run_after_patch_is_not_automatically_requeued(self):
+    async def test_stale_running_run_after_patch_enters_explicit_recovery_state(self):
+        # Verifies that a stale run after a durable patch side effect is surfaced as explicit recovery, not approval suspension.
+        # This catches stale-run handling that hides replay risk behind a generic approval state.
+        # needs_recovery is correct because the worker already performed side effects and the runtime must force structured recovery.
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             workspace = Workspace(root_path=tmpdir)
@@ -383,20 +390,25 @@ class TestLocalExecutionRuntimeService(unittest.IsolatedAsyncioTestCase):
 
             recovered = await repository.get_run(run_id)
             self.assertIsNotNone(recovered)
-            self.assertEqual(recovered.status, RunStatus.WAITING_FOR_APPROVAL)
+            self.assertEqual(recovered.status, RunStatus.NEEDS_RECOVERY)
             self.assertIsNone(recovered.worker_id)
             self.assertIsNone(recovered.lease_expires_at)
 
-            approvals = await repository.list_approval_requests(run_id)
-            self.assertEqual(len(approvals), 1)
+            recovery = await service.get_recovery_status(run_id)
+            self.assertIsNotNone(recovery)
+            self.assertEqual(recovery.recovery_state, RecoveryState.ROLLBACK_AVAILABLE)
+            self.assertIn(RecoveryOption.ROLLBACK_IF_AVAILABLE, recovery.recovery_options)
 
             stream = restarted.stream_events(run_id)
-            events = await self._collect_events(stream, 7)
-            self.assertEqual(events[-2].event_type, EventType.APPROVAL_REQUESTED)
+            events = await self._collect_events(stream, 8)
+            self.assertEqual(events[-2].event_type, EventType.RUN_NEEDS_RECOVERY)
             self.assertEqual(events[-1].event_type, EventType.AGENT_MESSAGE)
             self.assertEqual(events[-1].payload["kind"], "manual_recovery_required")
 
-    async def test_stale_running_run_after_command_start_is_not_automatically_requeued(self):
+    async def test_stale_running_run_after_command_start_enters_explicit_recovery_state(self):
+        # Verifies that a stale run after command.started becomes explicit recovery, not an auto-resumable approval state.
+        # This catches stale command recovery that would blur irreversible side effects into normal approval flow.
+        # needs_recovery is correct because the runtime knows command execution began but has no safe terminal replay.
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             service, repository = self._make_runtime(root)
@@ -424,12 +436,17 @@ class TestLocalExecutionRuntimeService(unittest.IsolatedAsyncioTestCase):
 
             recovered = await repository.get_run(run_id)
             self.assertIsNotNone(recovered)
-            self.assertEqual(recovered.status, RunStatus.WAITING_FOR_APPROVAL)
+            self.assertEqual(recovered.status, RunStatus.NEEDS_RECOVERY)
             self.assertIsNone(recovered.worker_id)
             self.assertIsNone(recovered.lease_expires_at)
 
+            recovery = await service.get_recovery_status(run_id)
+            self.assertIsNotNone(recovery)
+            self.assertEqual(recovery.recovery_state, RecoveryState.NEEDS_RECOVERY)
+            self.assertNotIn(RecoveryOption.ROLLBACK_IF_AVAILABLE, recovery.recovery_options)
+
             events = await repository.list_events(run_id)
-            self.assertEqual(events[-2].event_type, EventType.APPROVAL_REQUESTED)
+            self.assertEqual(events[-2].event_type, EventType.RUN_NEEDS_RECOVERY)
             self.assertEqual(events[-1].event_type, EventType.AGENT_MESSAGE)
 
     async def test_terminal_runs_cannot_transition_back_to_running(self):
@@ -630,6 +647,37 @@ class TestLocalExecutionRuntimeService(unittest.IsolatedAsyncioTestCase):
                 ],
             )
             self.assertEqual(events[-1].approval_id, approval_request.approval_id)
+
+    async def test_request_approval_reuses_existing_request_for_same_task_id(self):
+        # Verifies that repeating the same approval task_id replays the original approval instead of creating a duplicate checkpoint.
+        # This catches duplicate durable approval rows/events after resume or retried orchestration calls.
+        # Replay is correct because the first approval request is already the canonical side effect for that task_id.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            approval_request = self._make_approval_request(
+                run_id,
+                reason="Need approval to continue",
+                command_argv=("git", "push"),
+            )
+
+            first = await service.request_approval(run_id, approval_request)
+            second = await service.request_approval(run_id, approval_request)
+            approvals = await repository.list_approval_requests(run_id)
+            events = await repository.list_events(run_id)
+
+            self.assertEqual(first, second)
+            self.assertEqual(len(approvals), 1)
+            self.assertEqual(
+                [event.event_type for event in events].count(EventType.APPROVAL_REQUESTED),
+                1,
+            )
 
     async def test_request_approval_does_not_finalize_run(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -904,6 +952,9 @@ class TestLocalExecutionRuntimeService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(artifacts[0].uri, "app.txt")
 
     async def test_apply_patch_emits_replayable_patch_event(self):
+        # Verifies that patch application now emits a durable patch-started marker before patch/applied artifact events.
+        # This catches regressions where resume would lose the evidence that a patch side effect had already begun.
+        # The extra agent.message event is correct because patch.started is now the guardrail used for safe replay detection.
         with tempfile.TemporaryDirectory() as tmpdir:
             workspace = Workspace(root_path=tmpdir)
             service, _repository = self._make_runtime(
@@ -925,17 +976,19 @@ class TestLocalExecutionRuntimeService(unittest.IsolatedAsyncioTestCase):
             )
 
             stream = service.stream_events(run_id)
-            events = await self._collect_events(stream, 5)
+            events = await self._collect_events(stream, 6)
             self.assertEqual(
                 [event.event_type for event in events],
                 [
                     EventType.RUN_CREATED,
                     EventType.RUN_QUEUED,
                     EventType.RUN_STARTED,
+                    EventType.AGENT_MESSAGE,
                     EventType.PATCH_APPLIED,
                     EventType.ARTIFACT_CREATED,
                 ],
             )
+            self.assertEqual(events[3].payload["kind"], "patch.started")
 
     async def test_apply_patch_does_not_finalize_run(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1048,6 +1101,284 @@ class TestLocalExecutionRuntimeService(unittest.IsolatedAsyncioTestCase):
             )
 
             self.assertEqual(file_path.read_text(encoding="utf-8"), "after")
+
+    async def test_execute_command_reuses_existing_result_for_same_task_id(self):
+        # Verifies that rerunning the same command task_id replays the stored result instead of executing side effects twice.
+        # This catches duplicate command execution after resume when the coordinator dispatches the same saved action again.
+        # The replayed result is correct because the first terminal command event is already the canonical outcome for that task_id.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            request = self._make_command_request(run_id, argv=("sh", "-c", "printf once"))
+
+            first = await service.execute_command(request)
+            second = await service.execute_command(request)
+            events = await repository.list_events(run_id)
+
+            self.assertEqual(first.exit_code, 0)
+            self.assertEqual(second.exit_code, 0)
+            self.assertEqual(second.stdout, "")
+            self.assertEqual(
+                [event.event_type for event in events].count(EventType.COMMAND_STARTED),
+                1,
+            )
+            self.assertEqual(
+                [event.event_type for event in events].count(EventType.COMMAND_COMPLETED),
+                1,
+            )
+
+    async def test_execute_command_fails_loudly_if_same_task_only_started(self):
+        # Verifies that a half-finished command task cannot be silently replayed as if it were safe.
+        # This catches resume paths that would rerun side effects after a crash between command.started and completion.
+        # Failing is correct because the runtime has evidence the task already started but no terminal outcome to replay.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            claimed = await service.claim_next_run("worker-a", lease_seconds=30)
+            self.assertIsNotNone(claimed)
+            request = self._make_command_request(run_id, argv=("sh", "-c", "printf once"))
+            await repository.append_event_with_sequence(
+                run_id,
+                build_run_event(
+                    run_id=claimed.run_id,
+                    event_type=EventType.COMMAND_STARTED,
+                    run_status=RunStatus.RUNNING,
+                    task_id=request.task_id,
+                    payload={"argv": list(request.argv)},
+                ),
+            )
+
+            with self.assertRaises(InvalidRunStateError):
+                await service.execute_command(request)
+
+            recovery = await service.get_recovery_status(run_id)
+            run = await repository.get_run(run_id)
+
+            self.assertIsNotNone(recovery)
+            self.assertEqual(run.status, RunStatus.NEEDS_RECOVERY)
+            self.assertEqual(recovery.recovery_state, RecoveryState.NEEDS_RECOVERY)
+            self.assertEqual(
+                recovery.recovery_options,
+                (RecoveryOption.REVIEW_MANUALLY, RecoveryOption.ABORT),
+            )
+
+    async def test_apply_patch_reuses_existing_artifact_for_same_task_id(self):
+        # Verifies that rerunning the same patch task_id returns the stored artifact instead of mutating files twice.
+        # This catches duplicate patch application after resume when the same saved patch action is dispatched again.
+        # The replayed artifact is correct because the first persisted patch artifact is the canonical result for that task_id.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+            file_path = Path(tmpdir) / "app.txt"
+            file_path.write_text("before\n", encoding="utf-8")
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            proposal = self._make_patch_proposal(
+                run_id,
+                unified_diff="--- a/app.txt\n+++ b/app.txt\n@@ -1 +1 @@\n-before\n+after\n",
+                target_paths=("app.txt",),
+            )
+
+            first = await service.apply_patch(run_id, proposal)
+            second = await service.apply_patch(run_id, proposal)
+            artifacts = await repository.list_artifacts(run_id)
+            events = await repository.list_events(run_id)
+
+            self.assertEqual(first.artifact_id, second.artifact_id)
+            self.assertEqual(len(artifacts), 1)
+            self.assertEqual(file_path.read_text(encoding="utf-8"), "after\n")
+            self.assertEqual(
+                [event for event in events if event.event_type == EventType.PATCH_APPLIED].__len__(),
+                1,
+            )
+
+    async def test_apply_patch_fails_loudly_if_same_task_only_started(self):
+        # Verifies that a patch task with only a durable started marker cannot be replayed as a fresh patch apply.
+        # This catches resume paths that would apply the same destructive patch twice after a crash mid-application.
+        # Failing is correct because the runtime knows patch.started happened but has no artifact proving safe completion.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+            file_path = Path(tmpdir) / "app.txt"
+            file_path.write_text("before\n", encoding="utf-8")
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            claimed = await service.claim_next_run("worker-a", lease_seconds=30)
+            self.assertIsNotNone(claimed)
+            proposal = self._make_patch_proposal(
+                run_id,
+                unified_diff="--- a/app.txt\n+++ b/app.txt\n@@ -1 +1 @@\n-before\n+after\n",
+                target_paths=("app.txt",),
+            )
+            await repository.append_event_with_sequence(
+                run_id,
+                build_run_event(
+                    run_id=claimed.run_id,
+                    event_type=EventType.AGENT_MESSAGE,
+                    run_status=RunStatus.RUNNING,
+                    task_id=proposal.task_id,
+                    payload={"kind": "patch.started"},
+                ),
+            )
+
+            with self.assertRaises(InvalidRunStateError):
+                await service.apply_patch(run_id, proposal)
+
+            recovery = await service.get_recovery_status(run_id)
+            run = await repository.get_run(run_id)
+
+            self.assertIsNotNone(recovery)
+            self.assertEqual(run.status, RunStatus.NEEDS_RECOVERY)
+            self.assertEqual(recovery.recovery_state, RecoveryState.ROLLBACK_AVAILABLE)
+            self.assertEqual(recovery.rollback_task_id, proposal.task_id)
+            self.assertIn(RecoveryOption.ROLLBACK_IF_AVAILABLE, recovery.recovery_options)
+
+    async def test_rollback_task_restores_patch_snapshot_and_requires_manual_review(self):
+        # Verifies that patch snapshots can restore the workspace to its pre-patch state after recovery is required.
+        # This catches rollback implementations that mark recovery complete without actually undoing filesystem mutation.
+        # The restored file and rollback-required-review state are correct because undo should revert side effects but still force human review.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+            file_path = Path(tmpdir) / "app.txt"
+            file_path.write_text("before\n", encoding="utf-8")
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            proposal = self._make_patch_proposal(
+                run_id,
+                unified_diff="--- a/app.txt\n+++ b/app.txt\n@@ -1 +1 @@\n-before\n+after\n",
+                target_paths=("app.txt",),
+            )
+            await repository.save_patch_snapshot(
+                run_id=run_id,
+                task_id=proposal.task_id,
+                relative_path="app.txt",
+                existed_before=True,
+                content="before\n",
+            )
+            file_path.write_text("after\n", encoding="utf-8")
+            await repository.append_event_with_sequence(
+                run_id,
+                build_run_event(
+                    run_id=run_id,
+                    event_type=EventType.AGENT_MESSAGE,
+                    run_status=RunStatus.RUNNING,
+                    task_id=proposal.task_id,
+                    payload={"kind": "patch.started"},
+                ),
+            )
+            await repository.update_run_status(
+                run_id,
+                RunStatus.NEEDS_RECOVERY,
+                event_type=EventType.RUN_NEEDS_RECOVERY,
+                message="Patch started and interrupted.",
+            )
+            await repository.upsert_recovery_status(
+                RecoveryStatus(
+                    run_id=run_id,
+                    task_id=proposal.task_id,
+                    recovery_state=RecoveryState.ROLLBACK_AVAILABLE,
+                    reason="Patch task interrupted.",
+                    recovery_options=(
+                        RecoveryOption.ROLLBACK_IF_AVAILABLE,
+                        RecoveryOption.REVIEW_MANUALLY,
+                        RecoveryOption.ABORT,
+                    ),
+                    rollback_task_id=proposal.task_id,
+                )
+            )
+
+            recovery = await service.rollback_task(run_id, str(proposal.task_id))
+            events = await repository.list_events(run_id)
+
+            self.assertEqual(file_path.read_text(encoding="utf-8"), "before\n")
+            self.assertEqual(recovery.recovery_state, RecoveryState.ROLLBACK_REQUIRED_REVIEW)
+            self.assertEqual(
+                recovery.recovery_options,
+                (RecoveryOption.REVIEW_MANUALLY, RecoveryOption.ABORT),
+            )
+            self.assertEqual(events[-1].payload["kind"], "rollback.completed")
+
+    async def test_finalize_run_is_idempotent_for_same_terminal_status(self):
+        # Verifies that replaying the same terminal finalize request is a no-op instead of raising or rewriting state.
+        # This catches duplicate complete dispatch after resume when finalize_run already succeeded once.
+        # The unchanged event count is correct because the persisted terminal status is already the canonical final state.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            claimed = await service.claim_next_run("worker-a", lease_seconds=30)
+            self.assertIsNotNone(claimed)
+            result = RunResult(run_id=claimed.run_id, status=RunStatus.SUCCEEDED, summary="done")
+
+            await service.finalize_run(run_id, result)
+            before_events = await repository.list_events(run_id)
+            await service.finalize_run(run_id, result)
+            after_events = await repository.list_events(run_id)
+
+            self.assertEqual(len(before_events), len(after_events))
+            self.assertEqual((await repository.get_run(run_id)).status, RunStatus.SUCCEEDED)
+
+    async def test_record_approval_decision_updates_row_and_resume_run_transitions_back_to_running(self):
+        # Verifies that approval decisions are durably recorded and that an approval pause can be resumed explicitly.
+        # This catches approval flows that look accepted in memory but never update the durable runtime state.
+        # The running status is correct because the run was waiting solely on approval and has now been resumed.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            approval_request = self._make_approval_request(run_id)
+            await service.request_approval(run_id, approval_request)
+            await service.record_approval_decision(
+                ApprovalDecision(
+                    approval_id=approval_request.approval_id,
+                    run_id=approval_request.run_id,
+                    approved=True,
+                    reviewer="human",
+                    comment="looks safe",
+                )
+            )
+            await service.resume_run(run_id)
+
+            approvals = await repository.list_approval_requests(run_id)
+            run = await repository.get_run(run_id)
+            events = await repository.list_events(run_id)
+
+            self.assertEqual(len(approvals), 1)
+            self.assertEqual(run.status, RunStatus.RUNNING)
+            self.assertEqual(events[-2].event_type, EventType.APPROVAL_RESOLVED)
+            self.assertEqual(events[-1].event_type, EventType.RUN_STATUS_CHANGED)
 
 
 if __name__ == "__main__":

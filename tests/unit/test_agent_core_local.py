@@ -42,6 +42,7 @@ class TestLocalAgentCoreService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.run_id, run_id)
         self.assertEqual(session.workspace_id, workspace_id)
         self.assertEqual(session.user_request, "Create a deterministic planning session")
+        self.assertEqual(session.phase.value, "planning")
         validate_session_basic_shape(session)
 
     async def test_create_plan_requires_model_client(self):

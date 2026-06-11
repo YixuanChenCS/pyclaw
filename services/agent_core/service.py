@@ -13,6 +13,7 @@ from .models import (
     AgentFailure,
     AgentPlan,
     AgentSession,
+    AgentSessionPhase,
     PatchReview,
     RunSummary,
 )
@@ -28,6 +29,7 @@ class AgentCoreService(ABC):
         run_id: RunId,
         workspace_id: WorkspaceId,
         user_request: str,
+        phase: AgentSessionPhase | None = None,
         repo_context: RepoContextResult | None = None,
         current_plan: AgentPlan | None = None,
         prior_artifacts: Sequence[ArtifactRef] = (),

@@ -14,6 +14,7 @@ VALID_PLAN_STEP_KINDS = frozenset(
 MAX_AGENT_PLAN_STEPS = 8
 MAX_AGENT_ITERATIONS = 12
 MAX_REPEATED_ACTIONS = 3
+MAX_REPEATED_CONTEXT_REQUESTS = 3
 MAX_REPEATED_COMMAND_FAILURES = 2
 MAX_REPEATED_PATCH_REVIEW_FAILURES = 2
 MAX_NO_PROGRESS_ITERATIONS = 3
@@ -41,6 +42,27 @@ def validate_action_type(action_type: AgentActionType | str) -> AgentActionType:
         raise ValueError(f"Unsupported agent action type: {action_type!r}") from exc
 
 
+def validate_action_for_dispatch(action: AgentAction) -> None:
+    action_type = validate_action_type(action.type)
+
+    if not isinstance(action.reason, str) or not action.reason.strip():
+        raise AgentStateValidationError("AgentAction.reason must be a non-empty string")
+    if action.step_id is not None and (not isinstance(action.step_id, str) or not action.step_id.strip()):
+        raise AgentStateValidationError("AgentAction.step_id must be a non-empty string when provided")
+    if action.action_id is not None and (not isinstance(action.action_id, str) or not action.action_id.strip()):
+        raise AgentStateValidationError("AgentAction.action_id must be a non-empty string when provided")
+
+    if action_type == AgentActionType.RUN_COMMAND and not action.command_argv:
+        raise AgentStateValidationError("RUN_COMMAND actions must include command_argv")
+
+    if action_type == AgentActionType.PROPOSE_PATCH:
+        if action.patch_diff is None or not action.patch_diff.strip():
+            raise AgentStateValidationError("PROPOSE_PATCH actions must include patch_diff")
+
+    if action_type == AgentActionType.ASK_CONTEXT and not action.requested_context:
+        raise AgentStateValidationError("ASK_CONTEXT actions must include requested_context")
+
+
 def validate_session_basic_shape(session: AgentSession) -> None:
     if not str(session.run_id):
         raise ValueError("AgentSession.run_id must be set")
@@ -65,7 +87,17 @@ def validate_next_action_session(session: AgentSession) -> None:
 
     running_steps = 0
     first_pending_seen = False
+    seen_step_ids: set[str] = set()
     for index, step in enumerate(plan.steps, start=1):
+        if step.step_id is not None:
+            if not isinstance(step.step_id, str) or not step.step_id.strip():
+                raise AgentStateValidationError(
+                    f"Plan step {index} step_id must be a non-empty string when provided"
+                )
+            if step.step_id in seen_step_ids:
+                raise AgentStateValidationError(f"Plan step {index} reuses duplicate step_id {step.step_id!r}")
+            seen_step_ids.add(step.step_id)
+
         if not isinstance(step.kind, str) or not step.kind.strip():
             raise AgentStateValidationError(f"Plan step {index} must include a non-empty kind")
 
@@ -177,6 +209,13 @@ def evaluate_loop_guard(session: AgentSession) -> LoopGuardResult:
             triggered=True,
             guard_kind="repeated_action",
             reason="The same action has been repeated too many times",
+        )
+
+    if _count_consecutive_context_requests(session.action_history) >= MAX_REPEATED_CONTEXT_REQUESTS:
+        return LoopGuardResult(
+            triggered=True,
+            guard_kind="repeated_context_requests",
+            reason="Context requests repeated without incorporating new context",
         )
 
     if _count_consecutive_failures(session.failure_history, "command") >= MAX_REPEATED_COMMAND_FAILURES:
@@ -351,6 +390,15 @@ def _count_consecutive_failures(failures: Sequence[object], stage: str) -> int:
     count = 0
     for failure in reversed(failures):
         if getattr(failure, "stage", None) != stage:
+            break
+        count += 1
+    return count
+
+
+def _count_consecutive_context_requests(action_history: Sequence[AgentAction]) -> int:
+    count = 0
+    for action in reversed(action_history):
+        if action.type != AgentActionType.ASK_CONTEXT:
             break
         count += 1
     return count

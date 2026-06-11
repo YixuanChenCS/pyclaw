@@ -4,7 +4,14 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
-from packages.shared_types import ArtifactRef, RepoContextResult, TaskStatus, utc_now
+from packages.shared_types import (
+    ArtifactRef,
+    CommandResult,
+    RecoveryStatus,
+    RepoContextResult,
+    TaskStatus,
+    utc_now,
+)
 from packages.shared_types.ids import RunId, WorkspaceId
 from packages.shared_types.models import SerializableModel
 
@@ -16,6 +23,17 @@ class AgentActionType(str, Enum):
     REQUEST_APPROVAL = "request_approval"
     SUMMARIZE = "summarize"
     COMPLETE = "complete"
+
+
+class AgentSessionPhase(str, Enum):
+    PLANNING = "planning"
+    READY = "ready"
+    EXECUTING = "executing"
+    AWAITING_CONTEXT = "awaiting_context"
+    AWAITING_APPROVAL = "awaiting_approval"
+    NEEDS_RECOVERY = "needs_recovery"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -37,6 +55,7 @@ class AgentContextBudget(SerializableModel):
 class AgentStep(SerializableModel):
     kind: str
     description: str
+    step_id: str | None = None
     target_files: tuple[str, ...] = ()
     rationale: str | None = None
     status: TaskStatus = TaskStatus.PENDING
@@ -53,6 +72,8 @@ class AgentPlan(SerializableModel):
 class AgentAction(SerializableModel):
     type: AgentActionType
     reason: str
+    step_id: str | None = None
+    action_id: str | None = None
     target_files: tuple[str, ...] = ()
     command_argv: tuple[str, ...] = ()
     cwd: str | None = None
@@ -94,14 +115,32 @@ class LoopGuardResult(SerializableModel):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class AgentRunOutcome(SerializableModel):
+    status: str
+    session: AgentSession
+    last_action: AgentAction | None = None
+    summary: RunSummary | None = None
+    patch_review: PatchReview | None = None
+    command_result: CommandResult | None = None
+    approval_id: str | None = None
+    recovery_status: RecoveryStatus | None = None
+    requested_context: tuple[str, ...] = ()
+    applied_artifacts: tuple[ArtifactRef, ...] = ()
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class AgentSession(SerializableModel):
     run_id: RunId
     workspace_id: WorkspaceId
     user_request: str
+    phase: AgentSessionPhase = AgentSessionPhase.PLANNING
     repo_context: RepoContextResult | None = None
     current_plan: AgentPlan | None = None
     prior_artifacts: list[ArtifactRef] = field(default_factory=list)
     action_history: list[AgentAction] = field(default_factory=list)
+    pending_action: AgentAction | None = None
+    pending_approval_id: str | None = None
+    completed_action_ids: list[str] = field(default_factory=list)
     iteration_count: int = 0
     failure_history: list[AgentFailure] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)

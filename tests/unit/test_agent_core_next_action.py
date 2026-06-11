@@ -49,6 +49,8 @@ class TestAgentCoreNextAction(unittest.IsolatedAsyncioTestCase):
         action = await service.next_action(session)
 
         self.assertEqual(action.type.value, "propose_patch")
+        self.assertEqual(action.action_id, "action_1_propose_patch_step_1")
+        self.assertEqual(action.step_id, "step_1")
         self.assertEqual(action.reason, "Update the next_action implementation")
         self.assertEqual(action.target_files, ("services/agent_core/local.py",))
         self.assertEqual(action.summary_text, "Implement deterministic state-to-action mapping")
@@ -70,6 +72,7 @@ class TestAgentCoreNextAction(unittest.IsolatedAsyncioTestCase):
         action = await service.next_action(session)
 
         self.assertEqual(action.type.value, "run_command")
+        self.assertEqual(action.action_id, "action_1_run_command_step_1")
         self.assertEqual(
             action.command_argv,
             ("python", "-m", "unittest", "tests.unit.test_agent_core_plan"),
@@ -100,6 +103,7 @@ class TestAgentCoreNextAction(unittest.IsolatedAsyncioTestCase):
         action = await service.next_action(session)
 
         self.assertEqual(action.type.value, "complete")
+        self.assertEqual(action.action_id, "action_1_complete_complete")
         self.assertEqual(action.summary_text, "All planned agent_core work is complete")
 
     async def test_next_action_escalates_after_previous_failure(self):

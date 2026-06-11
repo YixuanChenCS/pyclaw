@@ -1,6 +1,6 @@
 """Shared contract surface for the modular pyclaw platform."""
 
-from .enums import ArtifactType, EventType, RunStatus, TaskStatus
+from .enums import ArtifactType, EventType, RecoveryOption, RecoveryState, RunStatus, TaskStatus
 from .errors import (
     ContractError,
     ContractSerializationError,
@@ -50,6 +50,7 @@ from .models import (
     LLMResponse,
     MetricPoint,
     PatchProposal,
+    RecoveryStatus,
     RepoContextRequest,
     RepoContextResult,
     Run,
@@ -116,6 +117,9 @@ __all__ = [
     "MetricPoint",
     "PatchApplier",
     "PatchProposal",
+    "RecoveryOption",
+    "RecoveryState",
+    "RecoveryStatus",
     "RepoContextRequest",
     "RepoContextResult",
     "RepoStore",

@@ -8,6 +8,16 @@ from services.agent_core.validation import MAX_AGENT_PLAN_STEPS, AgentPlanValida
 
 
 class TestAgentCorePlan(unittest.IsolatedAsyncioTestCase):
+    class _RecordingSessionStore:
+        def __init__(self) -> None:
+            self.saved_sessions = []
+
+        async def save_agent_session(self, session) -> None:
+            self.saved_sessions.append(session)
+
+        async def load_agent_session(self, run_id):
+            return None
+
     def _make_session(self, *, responses):
         service = LocalAgentCoreService(model_client=FakeModelClient(responses=list(responses)))
         run_id = new_run_id()
@@ -174,6 +184,47 @@ class TestAgentCorePlan(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(TypeError):
             await service.create_plan(session)
+
+    async def test_create_plan_persists_session_snapshot_with_current_plan(self):
+        # Verifies that create_plan saves the updated session snapshot with current_plan populated.
+        # This catches the gap where planning succeeds but no durable session state records the resulting plan.
+        # The persisted snapshot is correct because the stored session should be the original session plus the newly created structured plan.
+        session_store = self._RecordingSessionStore()
+        service = LocalAgentCoreService(
+            model_client=FakeModelClient(
+                responses=[
+                    {
+                        "goal": "Plan the create_plan implementation",
+                        "steps": [
+                            {
+                                "kind": "inspect",
+                                "description": "Inspect existing agent_core modules",
+                            }
+                        ],
+                    }
+                ]
+            ),
+            session_store=session_store,
+        )
+        run_id = new_run_id()
+        workspace_id = new_workspace_id()
+        session = service.create_session(
+            run_id=run_id,
+            workspace_id=workspace_id,
+            user_request="Persist the created plan",
+            repo_context=RepoContextResult(
+                workspace_id=workspace_id,
+                run_id=run_id,
+                repo_map="services/\n  agent_core/\n",
+            ),
+        )
+
+        plan = await service.create_plan(session)
+
+        self.assertEqual(plan.steps[0].step_id, "step_1")
+        self.assertEqual(len(session_store.saved_sessions), 1)
+        self.assertEqual(session_store.saved_sessions[0].phase.value, "ready")
+        self.assertEqual(session_store.saved_sessions[0].current_plan.to_dict(), plan.to_dict())
 
 
 if __name__ == "__main__":

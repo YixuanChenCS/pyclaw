@@ -39,6 +39,7 @@ def run_status_event_type(status: RunStatus) -> EventType:
     return {
         RunStatus.QUEUED: EventType.RUN_QUEUED,
         RunStatus.RUNNING: EventType.RUN_STARTED,
+        RunStatus.NEEDS_RECOVERY: EventType.RUN_NEEDS_RECOVERY,
         RunStatus.CANCELLED: EventType.RUN_CANCELLED,
         RunStatus.SUCCEEDED: EventType.RUN_COMPLETED,
         RunStatus.FAILED: EventType.RUN_FAILED,

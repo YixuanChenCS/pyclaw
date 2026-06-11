@@ -7,6 +7,7 @@ class RunStatus(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
     WAITING_FOR_APPROVAL = "waiting_for_approval"
+    NEEDS_RECOVERY = "needs_recovery"
     CANCELLING = "cancelling"
     CANCELLED = "cancelled"
     SUCCEEDED = "succeeded"
@@ -27,6 +28,7 @@ class EventType(str, Enum):
     RUN_QUEUED = "run.queued"
     RUN_STARTED = "run.started"
     RUN_STATUS_CHANGED = "run.status_changed"
+    RUN_NEEDS_RECOVERY = "run.needs_recovery"
     REPO_CONTEXT_BUILT = "repo.context_built"
     AGENT_PLAN = "agent.plan"
     AGENT_MESSAGE = "agent.message"
@@ -55,4 +57,24 @@ class ArtifactType(str, Enum):
     TEST_RESULT = "test_result"
 
 
-__all__ = ["ArtifactType", "EventType", "RunStatus", "TaskStatus"]
+class RecoveryState(str, Enum):
+    NEEDS_RECOVERY = "needs_recovery"
+    ROLLBACK_AVAILABLE = "rollback_available"
+    ROLLBACK_REQUIRED_REVIEW = "rollback_required_review"
+
+
+class RecoveryOption(str, Enum):
+    RESUME_IF_SAFE = "resume_if_safe"
+    REVIEW_MANUALLY = "review_manually"
+    ROLLBACK_IF_AVAILABLE = "rollback_if_available"
+    ABORT = "abort"
+
+
+__all__ = [
+    "ArtifactType",
+    "EventType",
+    "RecoveryOption",
+    "RecoveryState",
+    "RunStatus",
+    "TaskStatus",
+]

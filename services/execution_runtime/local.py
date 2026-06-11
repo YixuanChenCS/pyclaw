@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+import re
 from typing import AsyncIterator, Sequence
 
 from packages.shared_types import (
+    ApprovalDecision,
     ApprovalRequest,
     Artifact,
     ArtifactType,
@@ -20,6 +22,9 @@ from packages.shared_types import (
     InvalidRunStateError,
     LockLease,
     PatchProposal,
+    RecoveryOption,
+    RecoveryState,
+    RecoveryStatus,
     RepoStore,
     Run,
     RunEvent,
@@ -27,6 +32,7 @@ from packages.shared_types import (
     RunRequest,
     RunResult,
     RunStatus,
+    TaskId,
     Workspace,
     WorkspaceLockManager,
     build_run_event,
@@ -44,6 +50,8 @@ from .state_machine import TERMINAL_RUN_STATUSES
 
 class LocalExecutionRuntimeService(ExecutionRuntimeService):
     """Durable local runtime with SQLite-backed queue and event replay."""
+
+    _PATCH_HEADER_RE = re.compile(r"^(---|\+\+\+)\s+(.+)$")
 
     def __init__(
         self,
@@ -111,7 +119,12 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
                 f"Cannot cancel terminal run {run.run_id} in status {run.status.value}"
             )
 
-        if run.status not in {RunStatus.RUNNING, RunStatus.WAITING_FOR_APPROVAL, RunStatus.CANCELLING}:
+        if run.status not in {
+            RunStatus.RUNNING,
+            RunStatus.WAITING_FOR_APPROVAL,
+            RunStatus.NEEDS_RECOVERY,
+            RunStatus.CANCELLING,
+        }:
             raise InvalidRunStateError(
                 f"Cannot cancel run {run.run_id} in status {run.status.value}"
             )
@@ -163,6 +176,10 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
                 ErrorCode.INVALID_REQUEST,
                 "Command argv must not be empty.",
             )
+
+        replayed = await self._replay_command_result(request)
+        if replayed is not None:
+            return replayed
 
         run = await self._repository.get_run(request.run_id)
         if run is None:
@@ -247,6 +264,10 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
                 details={"run_id": run_id, "proposal_run_id": str(proposal.run_id)},
             )
 
+        replayed_artifact = await self._replay_patch_artifact(proposal)
+        if replayed_artifact is not None:
+            return replayed_artifact
+
         run = await self._repository.get_run(proposal.run_id)
         if run is None:
             raise EntityNotFoundError("run", str(proposal.run_id))
@@ -256,7 +277,19 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
             )
 
         workspace = await self._get_workspace(run)
+        await self._capture_patch_snapshots(workspace.root_path, proposal)
         applier = LocalPatchApplier(workspace.root_path)
+        await self._repository.append_event_with_sequence(
+            run.run_id,
+            build_run_event(
+                run_id=run.run_id,
+                event_type=EventType.AGENT_MESSAGE,
+                task_id=proposal.task_id,
+                run_status=run.status,
+                message="Patch application started.",
+                payload={"kind": "patch.started"},
+            ),
+        )
         try:
             changed_paths = applier.apply(proposal)
         except ErrorCodeContractError as exc:
@@ -343,6 +376,10 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
                 details={"run_id": run_id, "request_run_id": str(request.run_id)},
             )
 
+        replayed_approval_id = await self._replay_approval_request(request)
+        if replayed_approval_id is not None:
+            return replayed_approval_id
+
         run = await self._repository.get_run(request.run_id)
         if run is None:
             raise EntityNotFoundError("run", str(request.run_id))
@@ -354,6 +391,69 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
         await self._repository.create_approval_request(request)
         await self._release_workspace_lock(run_id)
         return str(request.approval_id)
+
+    async def record_approval_decision(self, decision: ApprovalDecision) -> None:
+        await self._ensure_started()
+        await self._repository.update_approval_decision(decision)
+
+    async def get_recovery_status(self, run_id: str) -> RecoveryStatus | None:
+        await self._ensure_started()
+        return await self._repository.get_recovery_status(run_id)
+
+    async def rollback_task(self, run_id: str, task_id: str) -> RecoveryStatus:
+        await self._ensure_started()
+        typed_run_id = RunId(run_id)
+        run = await self._repository.get_run(typed_run_id)
+        if run is None:
+            raise EntityNotFoundError("run", run_id)
+
+        typed_task_id = TaskId(task_id)
+        snapshots = await self._repository.list_patch_snapshots(typed_run_id, typed_task_id)
+        if not snapshots:
+            raise InvalidRunStateError(f"No rollback snapshot exists for task {task_id}")
+
+        workspace = await self._get_workspace(run)
+        root = Path(workspace.root_path).resolve(strict=True)
+        for snapshot in snapshots:
+            path = (root / str(snapshot["relative_path"])).resolve(strict=False)
+            if not path.is_relative_to(root):
+                raise InvalidRunStateError(
+                    f"Rollback path escapes workspace: {snapshot['relative_path']}"
+                )
+            if bool(snapshot["existed_before"]):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(str(snapshot["content"] or ""), encoding="utf-8")
+            elif path.exists():
+                path.unlink()
+
+        recovery = RecoveryStatus(
+            run_id=typed_run_id,
+            task_id=typed_task_id,
+            recovery_state=RecoveryState.ROLLBACK_REQUIRED_REVIEW,
+            reason="Rollback completed; manual review is required before continuing the run.",
+            recovery_options=(
+                RecoveryOption.REVIEW_MANUALLY,
+                RecoveryOption.ABORT,
+            ),
+            rollback_task_id=typed_task_id,
+        )
+        await self._repository.upsert_recovery_status(recovery)
+        await self._repository.append_event_with_sequence(
+            typed_run_id,
+            build_run_event(
+                run_id=typed_run_id,
+                event_type=EventType.AGENT_MESSAGE,
+                run_status=RunStatus.NEEDS_RECOVERY,
+                task_id=typed_task_id,
+                message=recovery.reason,
+                payload={
+                    "kind": "rollback.completed",
+                    "recovery_state": recovery.recovery_state.value,
+                    "rollback_task_id": str(typed_task_id),
+                },
+            ),
+        )
+        return recovery
 
     async def attach_artifacts(self, run_id: str, artifacts: Sequence[ArtifactRef]) -> None:
         raise NotImplementedError("Phase 1 does not implement artifact persistence.")
@@ -370,6 +470,12 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
         run = await self._repository.get_run(result.run_id)
         if run is None:
             raise EntityNotFoundError("run", str(result.run_id))
+        if run.status in TERMINAL_RUN_STATUSES:
+            if run.status == result.status:
+                return
+            raise InvalidRunStateError(
+                f"Cannot finalize terminal run {run.run_id} from {run.status.value} to {result.status.value}"
+            )
         if result.status not in TERMINAL_RUN_STATUSES:
             raise ErrorCodeContractError(
                 ErrorCode.INVALID_REQUEST,
@@ -393,6 +499,27 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
             payload=payload or None,
         )
         await self._release_workspace_lock(run_id)
+
+    async def resume_run(self, run_id: str) -> None:
+        await self._ensure_started()
+        typed_run_id = RunId(run_id)
+        run = await self._repository.get_run(typed_run_id)
+        if run is None:
+            raise EntityNotFoundError("run", run_id)
+        if run.status == RunStatus.RUNNING:
+            return
+        if run.status != RunStatus.WAITING_FOR_APPROVAL:
+            raise InvalidRunStateError(
+                f"Cannot resume run {run.run_id} in status {run.status.value}"
+            )
+
+        await self._repository.update_run_status(
+            run.run_id,
+            RunStatus.RUNNING,
+            event_type=EventType.RUN_STATUS_CHANGED,
+            message="Run resumed after approval.",
+            payload={"kind": "approval_resume"},
+        )
 
     async def deploy(self, request: DeploymentRequest) -> DeploymentResult:
         raise NotImplementedError("Phase 1 does not implement deployment.")
@@ -453,6 +580,204 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
         if lease is None:
             return
         await self._workspace_lock_manager.release(lease)
+
+    async def _replay_command_result(self, request: CommandRequest) -> CommandResult | None:
+        events = await self._repository.list_events(request.run_id)
+        started_event = None
+        terminal_event = None
+        for event in events:
+            if str(event.task_id or "") != str(request.task_id):
+                continue
+            if event.event_type == EventType.COMMAND_STARTED:
+                started_event = event
+            if event.event_type in {
+                EventType.COMMAND_COMPLETED,
+                EventType.COMMAND_FAILED,
+                EventType.COMMAND_TIMEOUT,
+                EventType.COMMAND_CANCELLED,
+            }:
+                terminal_event = event
+
+        if terminal_event is not None:
+            payload = dict(terminal_event.payload)
+            return CommandResult(
+                run_id=request.run_id,
+                task_id=request.task_id,
+                exit_code=payload.get("exit_code"),
+                timed_out=bool(payload.get("timed_out", False)),
+                cancelled=bool(payload.get("cancelled", False)),
+                stdout_truncated=bool(payload.get("stdout_truncated", False)),
+                stderr_truncated=bool(payload.get("stderr_truncated", False)),
+                termination_reason=payload.get("termination_reason"),
+                started_at=started_event.created_at if started_event is not None else None,
+                finished_at=terminal_event.created_at,
+            )
+
+        if started_event is not None:
+            await self._mark_recovery_required(
+                request.run_id,
+                task_id=request.task_id,
+                recovery_state=RecoveryState.NEEDS_RECOVERY,
+                reason=(
+                    f"Command task {request.task_id} already started and cannot be replayed safely."
+                ),
+                recovery_options=(
+                    RecoveryOption.REVIEW_MANUALLY,
+                    RecoveryOption.ABORT,
+                ),
+            )
+            raise InvalidRunStateError(
+                f"Command task {request.task_id} already started and cannot be replayed safely"
+            )
+
+        return None
+
+    async def _replay_patch_artifact(self, proposal: PatchProposal) -> ArtifactRef | None:
+        artifacts = await self._repository.list_artifacts(proposal.run_id)
+        for artifact in artifacts:
+            if artifact.artifact_type != ArtifactType.PATCH:
+                continue
+            if str(artifact.task_id or "") != str(proposal.task_id or ""):
+                continue
+            return artifact
+
+        events = await self._repository.list_events(proposal.run_id)
+        for event in events:
+            if str(event.task_id or "") != str(proposal.task_id or ""):
+                continue
+            if event.event_type == EventType.AGENT_MESSAGE and event.payload.get("kind") == "patch.started":
+                await self._mark_recovery_required(
+                    proposal.run_id,
+                    task_id=proposal.task_id,
+                    recovery_state=RecoveryState.ROLLBACK_AVAILABLE,
+                    reason=(
+                        f"Patch task {proposal.task_id} already started and cannot be replayed safely."
+                    ),
+                    recovery_options=(
+                        RecoveryOption.ROLLBACK_IF_AVAILABLE,
+                        RecoveryOption.REVIEW_MANUALLY,
+                        RecoveryOption.ABORT,
+                    ),
+                    rollback_task_id=proposal.task_id,
+                )
+                raise InvalidRunStateError(
+                    f"Patch task {proposal.task_id} already started and requires manual recovery"
+                )
+
+        return None
+
+    async def _replay_approval_request(self, request: ApprovalRequest) -> str | None:
+        if request.task_id is None:
+            return None
+
+        approvals = await self._repository.list_approval_requests(request.run_id)
+        for approval in approvals:
+            if str(approval.task_id or "") != str(request.task_id):
+                continue
+            if (
+                approval.reason != request.reason
+                or approval.command_argv != request.command_argv
+                or approval.patch_id != request.patch_id
+            ):
+                raise InvalidRunStateError(
+                    f"Approval task {request.task_id} already exists with conflicting request details"
+                )
+            return str(approval.approval_id)
+
+        return None
+
+    async def _capture_patch_snapshots(self, workspace_root: str, proposal: PatchProposal) -> None:
+        if proposal.task_id is None:
+            return
+
+        root = Path(workspace_root).resolve(strict=True)
+        for target_path in self._patch_target_paths(proposal):
+            path = (root / target_path).resolve(strict=False)
+            if not path.is_relative_to(root):
+                raise ErrorCodeContractError(
+                    ErrorCode.AGENT_WRITE_OUTSIDE_WORKSPACE,
+                    f"Patch target must stay inside workspace: {target_path}",
+                    details={
+                        "workspace_root": str(root),
+                        "resolved_path": str(path),
+                    },
+                )
+            existed_before = path.exists()
+            content = path.read_text(encoding="utf-8") if existed_before else None
+            await self._repository.save_patch_snapshot(
+                run_id=proposal.run_id,
+                task_id=proposal.task_id,
+                relative_path=target_path,
+                existed_before=existed_before,
+                content=content,
+            )
+
+    def _patch_target_paths(self, proposal: PatchProposal) -> tuple[str, ...]:
+        if proposal.target_paths:
+            return tuple(proposal.target_paths)
+
+        paths: list[str] = []
+        old_path: str | None = None
+        for line in proposal.unified_diff.splitlines():
+            match = self._PATCH_HEADER_RE.match(line)
+            if match is None:
+                continue
+            marker, raw_path = match.groups()
+            normalized = self._normalize_patch_header_path(raw_path)
+            if marker == "---":
+                old_path = normalized
+                continue
+            if marker == "+++":
+                if normalized == "/dev/null":
+                    if old_path is None or old_path == "/dev/null":
+                        raise InvalidRunStateError("Patch diff cannot delete /dev/null")
+                    paths.append(old_path)
+                else:
+                    paths.append(normalized)
+        return tuple(dict.fromkeys(paths))
+
+    def _normalize_patch_header_path(self, raw_path: str) -> str:
+        path = raw_path.strip()
+        if path.startswith(("a/", "b/")) and path != "/dev/null":
+            return path[2:]
+        return path
+
+    async def _mark_recovery_required(
+        self,
+        run_id: RunId,
+        *,
+        task_id: TaskId | None,
+        recovery_state: RecoveryState,
+        reason: str,
+        recovery_options: tuple[RecoveryOption, ...],
+        rollback_task_id: TaskId | None = None,
+    ) -> None:
+        run = await self._repository.get_run(run_id)
+        if run is None:
+            raise EntityNotFoundError("run", str(run_id))
+
+        recovery = RecoveryStatus(
+            run_id=run_id,
+            task_id=task_id,
+            recovery_state=recovery_state,
+            reason=reason,
+            recovery_options=recovery_options,
+            rollback_task_id=rollback_task_id,
+        )
+        await self._repository.upsert_recovery_status(recovery)
+        if run.status != RunStatus.NEEDS_RECOVERY:
+            await self._repository.update_run_status(
+                run_id,
+                RunStatus.NEEDS_RECOVERY,
+                event_type=EventType.RUN_NEEDS_RECOVERY,
+                message=reason,
+                payload={
+                    "recovery_state": recovery.recovery_state.value,
+                    "task_id": str(task_id) if task_id is not None else None,
+                    "rollback_task_id": str(rollback_task_id) if rollback_task_id is not None else None,
+                    "recovery_options": [option.value for option in recovery_options],
+                },
+            )
 
 
 __all__ = ["LocalExecutionRuntimeService"]

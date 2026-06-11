@@ -11,6 +11,7 @@ from packages.shared_types import (
     DeploymentRequest,
     DeploymentResult,
     PatchProposal,
+    RecoveryStatus,
     RunEvent,
     RunRequest,
     RunResult,
@@ -51,6 +52,14 @@ class ExecutionRuntimeService(ABC):
     @abstractmethod
     async def finalize_run(self, run_id: str, result: RunResult) -> None:
         """Mark the run complete and persist its final result."""
+
+    @abstractmethod
+    async def get_recovery_status(self, run_id: str) -> RecoveryStatus | None:
+        """Return the current structured recovery state for the run, if one exists."""
+
+    @abstractmethod
+    async def rollback_task(self, run_id: str, task_id: str) -> RecoveryStatus:
+        """Rollback a recoverable task and return the resulting recovery state."""
 
     @abstractmethod
     async def deploy(self, request: DeploymentRequest) -> DeploymentResult:

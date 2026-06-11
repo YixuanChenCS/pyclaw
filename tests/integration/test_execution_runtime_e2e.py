@@ -136,6 +136,7 @@ class TestExecutionRuntimeE2E(unittest.IsolatedAsyncioTestCase):
                     EventType.RUN_CREATED,
                     EventType.RUN_QUEUED,
                     EventType.RUN_STARTED,
+                    EventType.AGENT_MESSAGE,
                     EventType.PATCH_APPLIED,
                     EventType.ARTIFACT_CREATED,
                     EventType.COMMAND_STARTED,
@@ -143,6 +144,7 @@ class TestExecutionRuntimeE2E(unittest.IsolatedAsyncioTestCase):
                     EventType.RUN_COMPLETED,
                 ],
             )
+            self.assertEqual(events[3].payload["kind"], "patch.started")
 
 
 if __name__ == "__main__":

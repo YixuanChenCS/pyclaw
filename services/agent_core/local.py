@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 import re
 import shlex
 from typing import Iterable
@@ -17,11 +18,14 @@ from .models import (
     AgentFailure,
     AgentPlan,
     AgentSession,
+    AgentSessionPhase,
     AgentStep,
     PatchReview,
     RunSummary,
 )
 from .prompts import render_create_plan_prompt
+from .reducer import ensure_action_id
+from .session_store import AgentSessionStore
 from .service import AgentCoreService
 from .validation import (
     AgentStateValidationError,
@@ -40,8 +44,14 @@ class LocalAgentCoreService(AgentCoreService):
 
     _COMMAND_HINT_RE = re.compile(r"`([^`]+)`")
 
-    def __init__(self, *, model_client: ModelClient | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        model_client: ModelClient | None = None,
+        session_store: AgentSessionStore | None = None,
+    ) -> None:
         self._model_client = model_client
+        self._session_store = session_store
 
     @property
     def model_client(self) -> ModelClient | None:
@@ -53,10 +63,14 @@ class LocalAgentCoreService(AgentCoreService):
         run_id: RunId,
         workspace_id: WorkspaceId,
         user_request: str,
+        phase: AgentSessionPhase | None = None,
         repo_context: RepoContextResult | None = None,
         current_plan: AgentPlan | None = None,
         prior_artifacts: Sequence[ArtifactRef] = (),
         action_history: Sequence[AgentAction] = (),
+        pending_action: AgentAction | None = None,
+        pending_approval_id: str | None = None,
+        completed_action_ids: Sequence[str] = (),
         iteration_count: int = 0,
         failure_history: Sequence[AgentFailure] = (),
         warnings: Sequence[str] = (),
@@ -66,10 +80,14 @@ class LocalAgentCoreService(AgentCoreService):
             run_id=run_id,
             workspace_id=workspace_id,
             user_request=user_request,
+            phase=phase or self._initial_phase(current_plan),
             repo_context=repo_context,
-            current_plan=current_plan,
+            current_plan=self._normalize_plan_step_ids(current_plan),
             prior_artifacts=list(prior_artifacts),
             action_history=list(action_history),
+            pending_action=pending_action,
+            pending_approval_id=pending_approval_id,
+            completed_action_ids=list(completed_action_ids),
             iteration_count=iteration_count,
             failure_history=list(failure_history),
             warnings=list(warnings),
@@ -97,18 +115,26 @@ class LocalAgentCoreService(AgentCoreService):
         normalized = validate_plan_payload(payload)
         steps = [
             AgentStep(
+                step_id=f"step_{index}",
                 kind=step["kind"],
                 description=step["description"],
                 target_files=step["target_files"],
                 rationale=step["rationale"],
             )
-            for step in normalized["steps"]
+            for index, step in enumerate(normalized["steps"], start=1)
         ]
-        return AgentPlan(
+        plan = AgentPlan(
             goal=normalized["goal"],
             steps=steps,
             summary=normalized["summary"],
         )
+
+        if self._session_store is not None:
+            await self._session_store.save_agent_session(
+                replace(session, current_plan=plan, phase=AgentSessionPhase.READY)
+            )
+
+        return plan
 
     async def next_action(self, session: AgentSession) -> AgentAction:
         validate_next_action_session(session)
@@ -119,6 +145,7 @@ class LocalAgentCoreService(AgentCoreService):
                 reason=guard_result.reason or "Loop guard triggered",
                 approval_message=guard_result.reason,
                 approval_risk_reason=f"Loop guard triggered: {guard_result.guard_kind}",
+                action_id=self._action_id(session, AgentActionType.REQUEST_APPROVAL),
             )
 
         plan = session.current_plan
@@ -131,6 +158,7 @@ class LocalAgentCoreService(AgentCoreService):
                 reason=f"Cannot continue automatically after {latest_failure.stage} failure",
                 approval_message=latest_failure.message,
                 approval_risk_reason="Previous agent action failed and requires explicit review",
+                action_id=self._action_id(session, AgentActionType.REQUEST_APPROVAL),
             )
 
         failed_step = next(
@@ -148,6 +176,7 @@ class LocalAgentCoreService(AgentCoreService):
                 target_files=failed_step.target_files,
                 approval_message=failed_step.description,
                 approval_risk_reason="A prior plan step is marked failed and cannot be skipped",
+                action_id=self._action_id(session, AgentActionType.REQUEST_APPROVAL, failed_step.step_id),
             )
 
         next_step = next((step for step in plan.steps if step.status == TaskStatus.PENDING), None)
@@ -156,9 +185,10 @@ class LocalAgentCoreService(AgentCoreService):
                 type=AgentActionType.COMPLETE,
                 reason="Plan has no remaining pending steps",
                 summary_text=plan.summary or plan.goal,
+                action_id=self._action_id(session, AgentActionType.COMPLETE),
             )
 
-        return self._action_for_step(plan, next_step)
+        return self._action_for_step(session, plan, next_step)
 
     async def review_patch(
         self,
@@ -268,56 +298,62 @@ class LocalAgentCoreService(AgentCoreService):
             ordered.append(item)
         return ordered
 
-    def _action_for_step(self, plan: AgentPlan, step: AgentStep) -> AgentAction:
+    def _action_for_step(self, session: AgentSession, plan: AgentPlan, step: AgentStep) -> AgentAction:
         kind = step.kind.strip().lower()
 
         if kind == "inspect":
-            return AgentAction(
+            return ensure_action_id(session, AgentAction(
                 type=AgentActionType.ASK_CONTEXT,
                 reason=step.description,
+                step_id=step.step_id,
                 target_files=step.target_files,
                 requested_context=step.target_files,
-            )
+            ))
 
         if kind == "patch":
-            return AgentAction(
+            return ensure_action_id(session, AgentAction(
                 type=AgentActionType.PROPOSE_PATCH,
                 reason=step.description,
+                step_id=step.step_id,
                 target_files=step.target_files,
                 summary_text=step.rationale,
-            )
+            ))
 
         if kind == "command":
-            return AgentAction(
+            return ensure_action_id(session, AgentAction(
                 type=AgentActionType.RUN_COMMAND,
                 reason=step.description,
+                step_id=step.step_id,
                 target_files=step.target_files,
                 command_argv=self._command_for_step(step),
-            )
+            ))
 
         if kind == "approval":
-            return AgentAction(
+            return ensure_action_id(session, AgentAction(
                 type=AgentActionType.REQUEST_APPROVAL,
                 reason=step.description,
+                step_id=step.step_id,
                 target_files=step.target_files,
                 approval_message=step.description,
                 approval_risk_reason=step.rationale
                 or "Plan requires explicit approval before execution continues",
-            )
+            ))
 
         if kind == "summarize":
-            return AgentAction(
+            return ensure_action_id(session, AgentAction(
                 type=AgentActionType.SUMMARIZE,
                 reason=step.description,
+                step_id=step.step_id,
                 summary_text=step.rationale or step.description,
-            )
+            ))
 
         if kind == "complete":
-            return AgentAction(
+            return ensure_action_id(session, AgentAction(
                 type=AgentActionType.COMPLETE,
                 reason=step.description,
+                step_id=step.step_id,
                 summary_text=plan.summary or step.description,
-            )
+            ))
 
         raise AgentStateValidationError(f"Unsupported plan step kind {kind!r}")
 
@@ -372,3 +408,34 @@ class LocalAgentCoreService(AgentCoreService):
         if not path.endswith(".py"):
             raise AgentStateValidationError(f"Expected a Python test module path, got {path!r}")
         return path[:-3].replace("/", ".")
+
+    def _normalize_plan_step_ids(self, plan: AgentPlan | None) -> AgentPlan | None:
+        if plan is None:
+            return None
+
+        normalized_steps: list[AgentStep] = []
+        changed = False
+        for index, step in enumerate(plan.steps, start=1):
+            step_id = step.step_id or f"step_{index}"
+            if step.step_id != step_id:
+                changed = True
+                normalized_steps.append(replace(step, step_id=step_id))
+            else:
+                normalized_steps.append(step)
+
+        if not changed:
+            return plan
+
+        return replace(plan, steps=normalized_steps)
+
+    def _action_id(
+        self,
+        session: AgentSession,
+        action_type: AgentActionType,
+        step_id: str | None = None,
+    ) -> str:
+        step_scope = step_id or action_type.value
+        return f"action_{session.iteration_count + 1}_{action_type.value}_{step_scope}"
+
+    def _initial_phase(self, current_plan: AgentPlan | None) -> AgentSessionPhase:
+        return AgentSessionPhase.READY if current_plan is not None else AgentSessionPhase.PLANNING

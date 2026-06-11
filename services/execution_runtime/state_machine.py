@@ -23,6 +23,7 @@ ALLOWED_RUN_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
         {
             RunStatus.QUEUED,
             RunStatus.WAITING_FOR_APPROVAL,
+            RunStatus.NEEDS_RECOVERY,
             RunStatus.CANCELLING,
             RunStatus.CANCELLED,
             RunStatus.SUCCEEDED,
@@ -32,6 +33,16 @@ ALLOWED_RUN_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
     RunStatus.WAITING_FOR_APPROVAL: frozenset(
         {
             RunStatus.RUNNING,
+            RunStatus.NEEDS_RECOVERY,
+            RunStatus.CANCELLING,
+            RunStatus.CANCELLED,
+            RunStatus.FAILED,
+        }
+    ),
+    RunStatus.NEEDS_RECOVERY: frozenset(
+        {
+            RunStatus.RUNNING,
+            RunStatus.WAITING_FOR_APPROVAL,
             RunStatus.CANCELLING,
             RunStatus.CANCELLED,
             RunStatus.FAILED,
