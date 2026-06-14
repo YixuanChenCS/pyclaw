@@ -111,6 +111,9 @@ class TestLocalRepoIntelligenceService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(context.exception.error_code, ErrorCode.WORKSPACE_SYMLINK_ESCAPE)
 
     async def test_build_context_returns_repo_context_result(self):
+        # Verifies that build_context carries exact text for explicitly targeted files.
+        # This catches the patch-generation bug where the agent only received a summary and produced non-applicable hunks.
+        # The embedded content is correct because app.py is a small text target path and its full text should be available for downstream patch prompts.
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             self._init_git_repo(root)
@@ -134,6 +137,7 @@ class TestLocalRepoIntelligenceService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.workspace_id, workspace.workspace_id)
             self.assertTrue(result.file_summaries)
             self.assertEqual(result.file_summaries[0].path, "app.py")
+            self.assertEqual(result.file_summaries[0].content, "def main():\n    return 1\n")
             self.assertIsInstance(result.warnings, tuple)
 
     async def test_build_context_rejects_symlink_target_outside_workspace(self):

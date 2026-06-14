@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 
@@ -93,14 +94,21 @@ class TestAgentCoreResumeE2E(unittest.IsolatedAsyncioTestCase):
                             {
                                 "kind": "command",
                                 "description": "Run verification",
-                                "rationale": "command: sh -c 'printf resumed-command'",
                             },
                             {
                                 "kind": "complete",
                                 "description": "Finish the run",
                             },
                         ],
-                    }
+                    },
+                    {
+                        "command_argv": [
+                            sys.executable,
+                            "-c",
+                            "print('resumed-command')",
+                        ],
+                        "cwd": ".",
+                    },
                 ],
                 session_store=repository,
             )
@@ -114,7 +122,8 @@ class TestAgentCoreResumeE2E(unittest.IsolatedAsyncioTestCase):
             plan = await agent_core.create_plan(session)
             planned_session = replace(session, current_plan=plan, phase=AgentSessionPhase.READY)
             action = await agent_core.next_action(planned_session)
-            pending_session, selected_action = record_selected_action(planned_session, action)
+            generated_action = await agent_core.generate_command(planned_session, action)
+            pending_session, selected_action = record_selected_action(planned_session, generated_action)
             await repository.save_agent_session(pending_session)
             await runtime.execute_command(
                 CommandRequest(

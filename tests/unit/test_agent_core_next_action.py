@@ -55,10 +55,10 @@ class TestAgentCoreNextAction(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(action.target_files, ("services/agent_core/local.py",))
         self.assertEqual(action.summary_text, "Implement deterministic state-to-action mapping")
 
-    async def test_next_action_returns_unittest_command_for_test_targets(self):
-        # Verifies that command steps aimed at test files become deterministic unittest invocations.
-        # This catches regressions where command steps lose their executable shape or wrong modules are chosen.
-        # The expected command is correct because Python test-file paths map directly to unittest module names.
+    async def test_next_action_returns_command_intent_for_command_step(self):
+        # Verifies that command steps now produce a structured command intent instead of guessing argv in next_action.
+        # This catches regressions back to one-phase command generation, which would blur action selection with payload generation.
+        # The empty argv is correct because concrete command generation now happens in a later model-backed phase.
         service, session = self._make_session(
             steps=[
                 AgentStep(
@@ -73,10 +73,7 @@ class TestAgentCoreNextAction(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(action.type.value, "run_command")
         self.assertEqual(action.action_id, "action_1_run_command_step_1")
-        self.assertEqual(
-            action.command_argv,
-            ("python", "-m", "unittest", "tests.unit.test_agent_core_plan"),
-        )
+        self.assertEqual(action.command_argv, ())
         self.assertEqual(action.target_files, ("tests/unit/test_agent_core_plan.py",))
 
     async def test_next_action_returns_complete_when_no_steps_remain(self):
@@ -170,16 +167,18 @@ class TestAgentCoreNextAction(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(AgentStateValidationError):
             await service.next_action(session)
 
-    async def test_next_action_rejects_ambiguous_command_step(self):
-        # Verifies that command steps without executable hints or known test/check targets fail loudly.
-        # This catches broad fallback behavior that would invent a command and pretend the state was valid.
-        # Raising is correct because the pending command step does not contain enough deterministic information.
+    async def test_next_action_allows_ambiguous_command_step_as_intent_only(self):
+        # Verifies that command-step ambiguity no longer fails in next_action because payload generation is deferred.
+        # This catches coupling command selection back to argv synthesis in the wrong phase.
+        # Returning a command intent is correct because the concrete argv will be generated later by generate_command.
         service, session = self._make_session(
             steps=[AgentStep(kind="command", description="Run a useful verification step")]
         )
 
-        with self.assertRaises(AgentStateValidationError):
-            await service.next_action(session)
+        action = await service.next_action(session)
+
+        self.assertEqual(action.type, AgentActionType.RUN_COMMAND)
+        self.assertEqual(action.command_argv, ())
 
     async def test_next_action_rejects_succeeded_step_after_pending_step(self):
         # Verifies that plan-step ordering cannot show later success after earlier pending work.

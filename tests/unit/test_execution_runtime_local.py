@@ -226,6 +226,28 @@ class TestLocalExecutionRuntimeService(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(stored_second)
             self.assertEqual(stored_second.status, RunStatus.QUEUED)
 
+    async def test_claim_run_claims_the_requested_queued_run_instead_of_the_oldest_one(self):
+        # Verifies that exact run claiming activates the requested run_id rather than whichever queued row happens to sort first.
+        # This catches the lifecycle bug where CLI agent-patch could claim an older queued run and leave the newly created run stuck in queued.
+        # The requested run is correct because claim_run takes an explicit run_id and should transition that exact row to running.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(Path(tmpdir))
+
+            first_run_id = await service.enqueue_run(self._make_request(workspace))
+            second_run_id = await service.enqueue_run(self._make_request(workspace))
+
+            claimed = await service.claim_run(second_run_id, "worker-b", lease_seconds=30)
+            first_run = await repository.get_run(first_run_id)
+            second_run = await repository.get_run(second_run_id)
+
+            self.assertIsNotNone(claimed)
+            self.assertEqual(str(claimed.run_id), second_run_id)
+            self.assertIsNotNone(first_run)
+            self.assertEqual(first_run.status, RunStatus.QUEUED)
+            self.assertIsNotNone(second_run)
+            self.assertEqual(second_run.status, RunStatus.RUNNING)
+
     async def test_same_workspace_second_run_can_be_claimed_after_first_finalizes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             workspace = Workspace(root_path=tmpdir)

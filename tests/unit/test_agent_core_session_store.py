@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from packages.shared_types import RepoContextResult, TaskStatus, new_run_id, new_workspace_id
+from packages.shared_types import FileSummary, RepoContextResult, TaskStatus, new_run_id, new_workspace_id
 from services.agent_core import AgentAction, AgentActionType, AgentContextBudget, AgentFailure, AgentPlan, AgentSessionPhase, AgentStep, LocalAgentCoreService
 from services.execution_runtime import SQLiteExecutionRuntimeRepository
 
@@ -17,6 +17,14 @@ class TestAgentSessionStore(unittest.IsolatedAsyncioTestCase):
         return run_id, workspace_id, RepoContextResult(
             workspace_id=workspace_id,
             run_id=run_id,
+            file_summaries=(
+                FileSummary(
+                    path="services/agent_core/local.py",
+                    summary="small python file",
+                    language="python",
+                    content="def local():\n    return 'ok'\n",
+                ),
+            ),
             repo_map="services/\n  agent_core/\n",
             dependency_hints=("services.agent_core.local",),
             warnings=("context warning",),
@@ -67,7 +75,16 @@ class TestAgentSessionStore(unittest.IsolatedAsyncioTestCase):
                 pending_approval_id="approval_123",
                 completed_action_ids=("action_1_propose_patch_step_1",),
                 failure_history=[
-                    AgentFailure(stage="command", message="tests failed once", retryable=True)
+                    AgentFailure(
+                        stage="command",
+                        message="tests failed once",
+                        code="command_failed",
+                        retryable=True,
+                        details={
+                            "stdout": "F",
+                            "stderr": "NameError: helper_value is not defined",
+                        },
+                    )
                 ],
                 warnings=("session warning",),
                 context_budget=AgentContextBudget(
@@ -87,12 +104,20 @@ class TestAgentSessionStore(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(loaded.workspace_id, agent_session.workspace_id)
             self.assertEqual(loaded.user_request, agent_session.user_request)
             self.assertEqual(loaded.phase, AgentSessionPhase.AWAITING_APPROVAL)
+            self.assertEqual(loaded.repo_context.to_dict(), agent_session.repo_context.to_dict())
             self.assertEqual(loaded.current_plan.to_dict(), agent_session.current_plan.to_dict())
             self.assertEqual([action.to_dict() for action in loaded.action_history], [action.to_dict() for action in agent_session.action_history])
             self.assertEqual(loaded.pending_action.to_dict(), agent_session.pending_action.to_dict())
             self.assertEqual(loaded.pending_approval_id, agent_session.pending_approval_id)
             self.assertEqual(loaded.completed_action_ids, agent_session.completed_action_ids)
             self.assertEqual([failure.to_dict() for failure in loaded.failure_history], [failure.to_dict() for failure in agent_session.failure_history])
+            self.assertEqual(
+                loaded.failure_history[0].details,
+                {
+                    "stdout": "F",
+                    "stderr": "NameError: helper_value is not defined",
+                },
+            )
             self.assertEqual(loaded.warnings, agent_session.warnings)
             self.assertEqual(loaded.context_budget.to_dict(), agent_session.context_budget.to_dict())
 

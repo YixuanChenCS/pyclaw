@@ -9,6 +9,8 @@ from packages.shared_types import (
     ArtifactRef,
     CommandResult,
     EventType,
+    FileSummary,
+    ImpactAnalysis,
     PatchProposal,
     RecoveryOption,
     RecoveryState,
@@ -17,6 +19,7 @@ from packages.shared_types import (
     RunRequest,
     Session,
     RunStatus,
+    SymbolMatch,
     TaskStatus,
     Workspace,
     new_run_id,
@@ -34,6 +37,7 @@ from services.agent_core import (
     PatchReview,
     RunSummary,
 )
+from services.agent_core.validation import AgentPatchGenerationError
 from services.agent_core.validation import MAX_AGENT_ITERATIONS
 from services.execution_runtime import LocalExecutionRuntimeService, SQLiteExecutionRuntimeRepository
 
@@ -43,10 +47,14 @@ class _SequencedFakeAgentCore:
         self,
         *,
         actions: list[AgentAction],
+        generated_command: AgentAction | Exception | None = None,
+        generated_patch: AgentAction | Exception | None = None,
         review: PatchReview | Exception | None = None,
         log: list[str] | None = None,
     ) -> None:
         self._actions = list(actions)
+        self._generated_command = generated_command
+        self._generated_patch = generated_patch
         self._review = review or PatchReview(accepted=True, reason="ok", changed_files=("app.py",))
         self._log = log if log is not None else []
 
@@ -67,6 +75,27 @@ class _SequencedFakeAgentCore:
         self._log.append(f"next_action:{action.type.value}")
         return action
 
+    async def generate_patch(self, session, proposed_action):
+        self._log.append("generate_patch")
+        generated_patch = self._generated_patch
+        if isinstance(generated_patch, list):
+            if not generated_patch:
+                raise AssertionError("No more fake generated_patch responses available")
+            generated_patch = generated_patch.pop(0)
+        if isinstance(generated_patch, Exception):
+            raise generated_patch
+        if generated_patch is not None:
+            return generated_patch
+        return proposed_action
+
+    async def generate_command(self, session, proposed_action):
+        self._log.append("generate_command")
+        if isinstance(self._generated_command, Exception):
+            raise self._generated_command
+        if self._generated_command is not None:
+            return self._generated_command
+        return proposed_action
+
     async def review_patch(self, session, proposed_action):
         self._log.append("review_patch")
         if isinstance(self._review, Exception):
@@ -79,7 +108,12 @@ class _SequencedFakeAgentCore:
 
 
 class _RecordingFakeRuntime:
-    def __init__(self, *, log: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        command_results: list[CommandResult] | None = None,
+        log: list[str] | None = None,
+    ) -> None:
         self.calls: list[str] = []
         self.finalized_status: RunStatus | None = None
         self.finalized_summary: str | None = None
@@ -88,6 +122,7 @@ class _RecordingFakeRuntime:
         self.command_requests = []
         self.patch_proposals = []
         self.approval_requests = []
+        self._command_results = list(command_results) if command_results is not None else None
 
     async def enqueue_run(self, request):
         raise NotImplementedError
@@ -102,6 +137,11 @@ class _RecordingFakeRuntime:
         self.calls.append("execute_command")
         self._log.append("execute_command")
         self.command_requests.append(request)
+        if self._command_results is not None:
+            if not self._command_results:
+                raise AssertionError("No more fake command results available")
+            result = self._command_results.pop(0)
+            return replace(result, run_id=request.run_id, task_id=request.task_id)
         return CommandResult(run_id=request.run_id, task_id=request.task_id, exit_code=0)
 
     async def apply_patch(self, run_id, proposal):
@@ -215,6 +255,54 @@ class _InMemoryRepoStore:
         return self._workspaces.get(str(workspace_id))
 
 
+class _RecordingRepoIntelligence:
+    def __init__(
+        self,
+        *,
+        refreshed_context: RepoContextResult,
+        impact_analysis: ImpactAnalysis | None = None,
+        symbol_matches: tuple[SymbolMatch, ...] = (),
+        fail_stage: str | None = None,
+        log: list[str] | None = None,
+    ) -> None:
+        self.refreshed_context = refreshed_context
+        self.impact_analysis = impact_analysis or ImpactAnalysis()
+        self.symbol_matches = symbol_matches
+        self.fail_stage = fail_stage
+        self.log = log if log is not None else []
+        self.refresh_calls: list[tuple[Workspace, tuple[str, ...]]] = []
+        self.impact_calls: list[tuple[Workspace, tuple[str, ...]]] = []
+        self.search_queries: list[str] = []
+        self.context_requests = []
+
+    async def refresh_index(self, workspace, changed_files):
+        self.log.append("refresh_index")
+        self.refresh_calls.append((workspace, tuple(changed_files)))
+        if self.fail_stage == "refresh_index":
+            raise RuntimeError("refresh_index failed")
+
+    async def analyze_impact(self, workspace, files):
+        self.log.append("analyze_impact")
+        self.impact_calls.append((workspace, tuple(files)))
+        if self.fail_stage == "analyze_impact":
+            raise RuntimeError("analyze_impact failed")
+        return self.impact_analysis
+
+    async def search_symbols(self, workspace, query):
+        self.log.append("search_symbols")
+        self.search_queries.append(query)
+        if self.fail_stage == "search_symbols":
+            raise RuntimeError("search_symbols failed")
+        return self.symbol_matches
+
+    async def build_context(self, request):
+        self.log.append("build_context")
+        self.context_requests.append(request)
+        if self.fail_stage == "build_context":
+            raise RuntimeError("build_context failed")
+        return self.refreshed_context
+
+
 class TestAgentCoreCoordinator(unittest.IsolatedAsyncioTestCase):
     def _make_session(self):
         run_id = new_run_id()
@@ -234,15 +322,19 @@ class TestAgentCoreCoordinator(unittest.IsolatedAsyncioTestCase):
         run_id = new_run_id()
         workspace_id = new_workspace_id()
         service = LocalAgentCoreService()
-        return service.create_session(
-            run_id=run_id,
-            workspace_id=workspace_id,
-            user_request="Run the coordinator deterministically",
-            repo_context=RepoContextResult(
+        repo_context = overrides.pop(
+            "repo_context",
+            RepoContextResult(
                 workspace_id=workspace_id,
                 run_id=run_id,
                 repo_map="services/\n  agent_core/\n",
             ),
+        )
+        return service.create_session(
+            run_id=run_id,
+            workspace_id=workspace_id,
+            user_request="Run the coordinator deterministically",
+            repo_context=repo_context,
             current_plan=AgentPlan(
                 goal="Execute the current plan",
                 steps=list(steps),
@@ -328,6 +420,470 @@ class TestAgentCoreCoordinator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runtime.finalized_summary, "Everything succeeded")
         self.assertIsNone(outcome.session.pending_action)
 
+    async def test_coordinator_generates_command_before_execute_command(self):
+        # Verifies that command execution now goes through generate_command before runtime dispatch when next_action only returns command intent.
+        # This catches the broken command chain where run_command reached dispatch without a concrete argv payload.
+        # The order is correct because the coordinator must first ask agent_core to generate argv, then persist it, then execute the command.
+        log: list[str] = []
+        command_action = AgentAction(
+            type=AgentActionType.RUN_COMMAND,
+            reason="Run targeted tests",
+            step_id="step_1",
+            action_id="action_1_run_command_step_1",
+            target_files=("tests/unit/test_agent_core_runner.py",),
+        )
+        generated_command = AgentAction(
+            type=AgentActionType.RUN_COMMAND,
+            reason="Run targeted tests",
+            step_id="step_1",
+            action_id="action_1_run_command_step_1",
+            target_files=("tests/unit/test_agent_core_runner.py",),
+            command_argv=("python", "-m", "unittest", "tests.unit.test_agent_core_runner"),
+            cwd=".",
+        )
+        agent_core = _SequencedFakeAgentCore(
+            log=log,
+            actions=[
+                command_action,
+                AgentAction(
+                    type=AgentActionType.COMPLETE,
+                    reason="Run complete",
+                    summary_text="Everything succeeded",
+                ),
+            ],
+            generated_command=generated_command,
+        )
+        runtime = _RecordingFakeRuntime(log=log)
+        session_store = _RecordingSessionStore(log=log)
+        coordinator = AgentCoreCoordinator(
+            agent_core=agent_core,
+            execution_runtime=runtime,
+            session_store=session_store,
+        )
+
+        outcome = await coordinator.run(self._make_session())
+
+        self.assertEqual(outcome.status, "completed")
+        self.assertEqual(
+            log,
+            [
+                "next_action:run_command",
+                "save_agent_session",
+                "generate_command",
+                "save_agent_session",
+                "execute_command",
+                "save_agent_session",
+                "next_action:complete",
+                "save_agent_session",
+                "finalize_run",
+                "save_agent_session",
+            ],
+        )
+        self.assertEqual(
+            session_store.saved_sessions[1].pending_action.command_argv,
+            generated_command.command_argv,
+        )
+        self.assertEqual(runtime.command_requests[0].argv, generated_command.command_argv)
+
+    async def test_coordinator_generates_patch_diff_before_review_and_apply(self):
+        # Verifies that patch execution now goes through generate_patch before review/apply when next_action only returns patch intent.
+        # This catches the broken patch chain where propose_patch reached dispatch without a patch_diff.
+        # The order is correct because the coordinator must first ask agent_core to generate a concrete diff, then review it, then apply it.
+        log: list[str] = []
+        patch_action = AgentAction(
+            type=AgentActionType.PROPOSE_PATCH,
+            reason="Patch app.py",
+            step_id="step_1",
+            action_id="action_1_propose_patch_step_1",
+            target_files=("app.py",),
+        )
+        generated_patch = AgentAction(
+            type=AgentActionType.PROPOSE_PATCH,
+            reason="Patch app.py",
+            step_id="step_1",
+            action_id="action_1_propose_patch_step_1",
+            target_files=("app.py",),
+            patch_diff="--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-old\n+new\n",
+        )
+        agent_core = _SequencedFakeAgentCore(
+            log=log,
+            actions=[
+                patch_action,
+                AgentAction(
+                    type=AgentActionType.COMPLETE,
+                    reason="Run complete",
+                    summary_text="Everything succeeded",
+                ),
+            ],
+            generated_patch=generated_patch,
+            review=PatchReview(
+                accepted=True,
+                reason="Patch passed review",
+                changed_files=("app.py",),
+                patch_diff=generated_patch.patch_diff,
+            ),
+        )
+        runtime = _RecordingFakeRuntime(log=log)
+        session_store = _RecordingSessionStore(log=log)
+        coordinator = AgentCoreCoordinator(
+            agent_core=agent_core,
+            execution_runtime=runtime,
+            session_store=session_store,
+        )
+
+        outcome = await coordinator.run(self._make_session())
+
+        self.assertEqual(outcome.status, "completed")
+        self.assertEqual(
+            log,
+            [
+                "next_action:propose_patch",
+                "save_agent_session",
+                "generate_patch",
+                "save_agent_session",
+                "review_patch",
+                "apply_patch",
+                "save_agent_session",
+                "next_action:complete",
+                "save_agent_session",
+                "finalize_run",
+                "save_agent_session",
+            ],
+        )
+        self.assertEqual(session_store.saved_sessions[1].pending_action.patch_diff, generated_patch.patch_diff)
+        self.assertEqual(runtime.patch_proposals[0].unified_diff, generated_patch.patch_diff)
+
+    async def test_coordinator_refreshes_repo_context_after_successful_patch(self):
+        # Verifies that a successful patch refreshes repo intelligence and stores the refreshed context for later agent steps.
+        # This catches stale post-edit session context, which previously left later prompts anchored to pre-patch file contents.
+        # The refreshed context is correct because the coordinator should update repo intelligence after the runtime mutates workspace files.
+        log: list[str] = []
+        workspace = Workspace(root_path="/tmp/agent-core-runner-refresh")
+        run_id = new_run_id()
+        refreshed_context = RepoContextResult(
+            workspace_id=workspace.workspace_id,
+            run_id=run_id,
+            repo_map="updated repo map",
+            file_summaries=(
+                FileSummary(path="app.py", summary="after patch", content="after\n"),
+                FileSummary(path="tests/test_app.py", summary="impacted test"),
+            ),
+            warnings=("context warning",),
+        )
+        repo_intelligence = _RecordingRepoIntelligence(
+            refreshed_context=refreshed_context,
+            impact_analysis=ImpactAnalysis(
+                changed_paths=("app.py",),
+                impacted_paths=("app.py", "tests/test_app.py"),
+                warnings=("impact warning",),
+            ),
+            log=log,
+        )
+        agent_core = _SequencedFakeAgentCore(
+            log=log,
+            actions=[
+                AgentAction(
+                    type=AgentActionType.PROPOSE_PATCH,
+                    reason="Patch app.py",
+                    step_id="step_1",
+                    action_id="action_1_propose_patch_step_1",
+                    target_files=("app.py",),
+                    patch_diff="--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-before\n+after\n",
+                ),
+                AgentAction(
+                    type=AgentActionType.COMPLETE,
+                    reason="Run complete",
+                    summary_text="Everything succeeded",
+                ),
+            ],
+            review=PatchReview(
+                accepted=True,
+                reason="Patch passed review",
+                changed_files=("app.py",),
+                patch_diff="--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-before\n+after\n",
+            ),
+        )
+        runtime = _RecordingFakeRuntime(log=log)
+        session_store = _RecordingSessionStore(log=log)
+        coordinator = AgentCoreCoordinator(
+            agent_core=agent_core,
+            execution_runtime=runtime,
+            session_store=session_store,
+            repo_intelligence=repo_intelligence,
+            repo_store=_InMemoryRepoStore({str(workspace.workspace_id): workspace}),
+        )
+        service = LocalAgentCoreService()
+        session = service.create_session(
+            run_id=run_id,
+            workspace_id=workspace.workspace_id,
+            user_request="Patch app.py and continue",
+            repo_context=RepoContextResult(
+                workspace_id=workspace.workspace_id,
+                run_id=run_id,
+                repo_map="stale repo map",
+                file_summaries=(
+                    FileSummary(path="app.py", summary="before patch", content="before\n"),
+                ),
+            ),
+            current_plan=AgentPlan(
+                goal="Patch and finish",
+                steps=[
+                    AgentStep(step_id="step_1", kind="patch", description="Patch app.py", target_files=("app.py",)),
+                    AgentStep(step_id="step_2", kind="complete", description="Finish"),
+                ],
+            ),
+        )
+
+        outcome = await coordinator.run(session)
+
+        self.assertEqual(outcome.status, "completed")
+        self.assertEqual(log, [
+            "next_action:propose_patch",
+            "save_agent_session",
+            "review_patch",
+            "apply_patch",
+            "refresh_index",
+            "analyze_impact",
+            "build_context",
+            "save_agent_session",
+            "next_action:complete",
+            "save_agent_session",
+            "finalize_run",
+            "save_agent_session",
+        ])
+        self.assertEqual(repo_intelligence.refresh_calls[0][1], ("app.py",))
+        self.assertEqual(repo_intelligence.impact_calls[0][1], ("app.py",))
+        self.assertEqual(repo_intelligence.context_requests[0].target_paths, ("app.py", "tests/test_app.py"))
+        self.assertEqual(outcome.session.repo_context.repo_map, "updated repo map")
+        self.assertEqual(outcome.session.repo_context.file_summaries[0].content, "after\n")
+        self.assertEqual(
+            outcome.session.repo_context.warnings,
+            ("impact warning", "context warning"),
+        )
+        self.assertIn("impact warning", outcome.session.warnings)
+        self.assertIn("context warning", outcome.session.warnings)
+
+    async def test_coordinator_keeps_patch_run_alive_when_repo_refresh_fails(self):
+        # Verifies that repo-intelligence refresh is best-effort after patch application.
+        # This catches a brittle coordinator that would turn a successful runtime patch into a failed run just because index refresh broke.
+        # The run still completes because execution side effects already succeeded and refresh should only annotate warnings.
+        workspace = Workspace(root_path="/tmp/agent-core-runner-refresh-failure")
+        run_id = new_run_id()
+        repo_intelligence = _RecordingRepoIntelligence(
+            refreshed_context=RepoContextResult(
+                workspace_id=workspace.workspace_id,
+                run_id=run_id,
+            ),
+            fail_stage="refresh_index",
+        )
+        agent_core = _SequencedFakeAgentCore(
+            actions=[
+                AgentAction(
+                    type=AgentActionType.PROPOSE_PATCH,
+                    reason="Patch app.py",
+                    step_id="step_1",
+                    action_id="action_1_propose_patch_step_1",
+                    target_files=("app.py",),
+                    patch_diff="--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-before\n+after\n",
+                ),
+                AgentAction(
+                    type=AgentActionType.COMPLETE,
+                    reason="Run complete",
+                    summary_text="Everything succeeded",
+                ),
+            ],
+            review=PatchReview(
+                accepted=True,
+                reason="Patch passed review",
+                changed_files=("app.py",),
+                patch_diff="--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-before\n+after\n",
+            ),
+        )
+        runtime = _RecordingFakeRuntime()
+        coordinator = AgentCoreCoordinator(
+            agent_core=agent_core,
+            execution_runtime=runtime,
+            repo_intelligence=repo_intelligence,
+            repo_store=_InMemoryRepoStore({str(workspace.workspace_id): workspace}),
+        )
+        service = LocalAgentCoreService()
+        session = service.create_session(
+            run_id=run_id,
+            workspace_id=workspace.workspace_id,
+            user_request="Patch app.py and finish",
+            repo_context=RepoContextResult(
+                workspace_id=workspace.workspace_id,
+                run_id=run_id,
+                file_summaries=(FileSummary(path="app.py", summary="before patch", content="before\n"),),
+            ),
+            current_plan=AgentPlan(
+                goal="Patch and finish",
+                steps=[
+                    AgentStep(step_id="step_1", kind="patch", description="Patch app.py", target_files=("app.py",)),
+                    AgentStep(step_id="step_2", kind="complete", description="Finish"),
+                ],
+            ),
+        )
+
+        outcome = await coordinator.run(session)
+
+        self.assertEqual(outcome.status, "completed")
+        self.assertIn("repo_intelligence refresh after patch failed", outcome.session.warnings[0])
+
+    async def test_coordinator_records_command_failure_context_and_continues_repair_loop(self):
+        # Verifies that nonzero command exits are recorded as retryable failures, enriched with repo intelligence, and kept in-loop for repair.
+        # This catches the old broken behavior where verification failures stopped the run without feeding stderr/stdout and refreshed context into the next fix step.
+        # The completed outcome is correct because the coordinator should repair after the failed command, rerun verification, and only then finish.
+        log: list[str] = []
+        workspace = Workspace(root_path="/tmp/agent-core-runner-command-repair")
+        run_id = new_run_id()
+        repo_intelligence = _RecordingRepoIntelligence(
+            refreshed_context=RepoContextResult(
+                workspace_id=workspace.workspace_id,
+                run_id=run_id,
+                repo_map="refreshed repo map",
+                file_summaries=(
+                    FileSummary(path="app.py", summary="helper definition", content="helper_value = 1\n"),
+                    FileSummary(path="tests/test_app.py", summary="failing test"),
+                ),
+                warnings=("context warning",),
+            ),
+            impact_analysis=ImpactAnalysis(
+                changed_paths=("tests/test_app.py",),
+                impacted_paths=("app.py", "tests/test_app.py"),
+                warnings=("impact warning",),
+            ),
+            symbol_matches=(
+                SymbolMatch(name="helper_value", kind="variable", path="app.py", line=3),
+            ),
+            log=log,
+        )
+        agent_core = _SequencedFakeAgentCore(
+            log=log,
+            actions=[
+                AgentAction(
+                    type=AgentActionType.RUN_COMMAND,
+                    reason="Run focused tests",
+                    step_id="step_1",
+                    action_id="action_1_run_command_step_1",
+                    target_files=("tests/test_app.py",),
+                    command_argv=("python", "-m", "pytest", "tests/test_app.py"),
+                ),
+                AgentAction(
+                    type=AgentActionType.PROPOSE_PATCH,
+                    reason="Fix the helper usage",
+                    step_id="step_2",
+                    action_id="action_2_propose_patch_step_2",
+                    target_files=("app.py",),
+                    patch_diff="--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-helper_value = 0\n+helper_value = 1\n",
+                ),
+                AgentAction(
+                    type=AgentActionType.RUN_COMMAND,
+                    reason="Re-run focused tests",
+                    step_id="step_1",
+                    action_id="action_3_run_command_step_1",
+                    target_files=("tests/test_app.py",),
+                    command_argv=("python", "-m", "pytest", "tests/test_app.py"),
+                ),
+                AgentAction(
+                    type=AgentActionType.COMPLETE,
+                    reason="Run complete",
+                    summary_text="Everything succeeded",
+                ),
+            ],
+            review=PatchReview(
+                accepted=True,
+                reason="Patch passed review",
+                changed_files=("app.py",),
+                patch_diff="--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-helper_value = 0\n+helper_value = 1\n",
+            ),
+        )
+        runtime = _RecordingFakeRuntime(
+            command_results=[
+                CommandResult(
+                    run_id=run_id,
+                    task_id="task_fail",
+                    exit_code=1,
+                    stdout="F",
+                    stderr="NameError: helper_value is not defined",
+                ),
+                CommandResult(
+                    run_id=run_id,
+                    task_id="task_pass",
+                    exit_code=0,
+                    stdout="1 passed",
+                ),
+            ],
+            log=log,
+        )
+        session_store = _RecordingSessionStore(log=log)
+        coordinator = AgentCoreCoordinator(
+            agent_core=agent_core,
+            execution_runtime=runtime,
+            session_store=session_store,
+            repo_intelligence=repo_intelligence,
+            repo_store=_InMemoryRepoStore({str(workspace.workspace_id): workspace}),
+        )
+        session = LocalAgentCoreService().create_session(
+            run_id=run_id,
+            workspace_id=workspace.workspace_id,
+            user_request="Fix the failing test and rerun it",
+            repo_context=RepoContextResult(
+                workspace_id=workspace.workspace_id,
+                run_id=run_id,
+                repo_map="stale repo map",
+                file_summaries=(
+                    FileSummary(path="tests/test_app.py", summary="failing test", content="assert helper_value == 1\n"),
+                ),
+            ),
+            current_plan=AgentPlan(
+                goal="Fix the failure",
+                steps=[
+                    AgentStep(step_id="step_1", kind="command", description="Run focused tests", target_files=("tests/test_app.py",)),
+                    AgentStep(step_id="step_2", kind="patch", description="Fix the helper usage", target_files=("app.py",)),
+                    AgentStep(step_id="step_3", kind="complete", description="Finish"),
+                ],
+            ),
+        )
+
+        outcome = await coordinator.run(session)
+
+        self.assertEqual(outcome.status, "completed")
+        self.assertEqual(
+            runtime.calls,
+            ["execute_command", "apply_patch", "execute_command", "finalize_run"],
+        )
+        self.assertIn("search_symbols", log)
+        self.assertEqual(repo_intelligence.search_queries[0], "NameError")
+        self.assertEqual(repo_intelligence.impact_calls[0][1], ("tests/test_app.py",))
+        self.assertEqual(
+            repo_intelligence.context_requests[0].target_paths,
+            ("tests/test_app.py", "app.py"),
+        )
+        self.assertIn("Verification command failed", repo_intelligence.context_requests[0].prompt or "")
+        self.assertIn(
+            "stderr: NameError: helper_value is not defined",
+            repo_intelligence.context_requests[0].prompt or "",
+        )
+
+        failure_snapshot = session_store.saved_sessions[1]
+        self.assertEqual(failure_snapshot.failure_history[-1].stage, "command")
+        self.assertTrue(failure_snapshot.failure_history[-1].retryable)
+        self.assertEqual(failure_snapshot.failure_history[-1].code, "command_failed")
+        self.assertEqual(
+            failure_snapshot.failure_history[-1].details["stderr"],
+            "NameError: helper_value is not defined",
+        )
+        self.assertEqual(failure_snapshot.failure_history[-1].details["stdout"], "F")
+        self.assertEqual(failure_snapshot.repo_context.repo_map, "refreshed repo map")
+        self.assertEqual(
+            tuple(match.name for match in failure_snapshot.repo_context.symbols),
+            ("helper_value",),
+        )
+        self.assertIn("impact warning", failure_snapshot.warnings)
+        self.assertIn("context warning", failure_snapshot.warnings)
+        self.assertFalse(any(failure.stage == "command" for failure in outcome.session.failure_history))
+
     async def test_coordinator_does_not_apply_patch_when_review_fails(self):
         # Verifies that a rejected patch review stops execution before runtime patch application.
         # This catches coordinators that dispatch unsafe patches even after deterministic review rejects them.
@@ -352,6 +908,233 @@ class TestAgentCoreCoordinator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runtime.calls, [])
         self.assertEqual(outcome.session.failure_history[-1].stage, "review_patch")
         self.assertIn("unsafe patch", outcome.session.failure_history[-1].message)
+
+    async def test_coordinator_fails_loudly_when_patch_generation_is_invalid(self):
+        # Verifies that patch-generation failures stop execution before review/apply and surface a dedicated failure stage.
+        # This catches permissive fallback behavior that would continue with an empty or malformed patch proposal.
+        # The generate_patch failure is correct because no valid patch_diff exists yet, so the patch chain cannot continue safely.
+        agent_core = _SequencedFakeAgentCore(
+            actions=[
+                AgentAction(
+                    type=AgentActionType.PROPOSE_PATCH,
+                    reason="Patch app.py",
+                    target_files=("app.py",),
+                )
+            ],
+            generated_patch=ValueError("malformed patch json"),
+        )
+        runtime = _RecordingFakeRuntime()
+        coordinator = AgentCoreCoordinator(agent_core=agent_core, execution_runtime=runtime)
+
+        outcome = await coordinator.run(self._make_session())
+
+        self.assertEqual(outcome.status, "failed")
+        self.assertEqual(outcome.session.failure_history[-1].stage, "generate_patch")
+        self.assertEqual(runtime.calls, [])
+
+    async def test_coordinator_retries_retryable_patch_generation_failure_once_then_applies_patch(self):
+        # Verifies that retryable patch-generation failures are recorded and retried before any runtime side effect.
+        # This catches a brittle patch loop that would fail immediately on one recoverable model miss instead of retrying safely.
+        # Completion is correct because the first failure is retryable, the second generated patch is valid, and apply_patch runs once.
+        log: list[str] = []
+        patch_action = AgentAction(
+            type=AgentActionType.PROPOSE_PATCH,
+            reason="Patch app.py",
+            step_id="step_1",
+            action_id="action_1_propose_patch_step_1",
+            target_files=("app.py",),
+        )
+        generated_patch = AgentAction(
+            type=AgentActionType.PROPOSE_PATCH,
+            reason="Patch app.py",
+            step_id="step_1",
+            action_id="action_1_propose_patch_step_1",
+            target_files=("app.py",),
+            patch_diff="--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-before\n+after\n",
+        )
+        agent_core = _SequencedFakeAgentCore(
+            log=log,
+            actions=[
+                patch_action,
+                AgentAction(
+                    type=AgentActionType.COMPLETE,
+                    reason="Run complete",
+                    summary_text="Everything succeeded",
+                ),
+            ],
+            generated_patch=[
+                AgentPatchGenerationError("search_not_found", "SEARCH block did not match"),
+                generated_patch,
+            ],
+            review=PatchReview(
+                accepted=True,
+                reason="Patch passed review",
+                changed_files=("app.py",),
+                patch_diff=generated_patch.patch_diff,
+            ),
+        )
+        runtime = _RecordingFakeRuntime(log=log)
+        session_store = _RecordingSessionStore(log=log)
+        coordinator = AgentCoreCoordinator(
+            agent_core=agent_core,
+            execution_runtime=runtime,
+            session_store=session_store,
+        )
+        session = self._make_session_with_plan(
+            steps=[
+                AgentStep(
+                    step_id="step_1",
+                    kind="patch",
+                    description="Patch app.py",
+                    target_files=("app.py",),
+                ),
+                AgentStep(
+                    step_id="step_2",
+                    kind="complete",
+                    description="Finish",
+                ),
+            ],
+            repo_context=RepoContextResult(
+                workspace_id=new_workspace_id(),
+                run_id=new_run_id(),
+                repo_map="app.py\n",
+                file_summaries=(
+                    FileSummary(path="app.py", summary="text file", content="before\n"),
+                ),
+            ),
+        )
+
+        outcome = await coordinator.run(session)
+
+        self.assertEqual(outcome.status, "completed")
+        self.assertEqual(log.count("generate_patch"), 2)
+        self.assertEqual(runtime.calls.count("apply_patch"), 1)
+        self.assertEqual(outcome.session.failure_history[0].code, "search_not_found")
+        self.assertTrue(outcome.session.failure_history[0].retryable)
+
+    async def test_coordinator_stops_when_the_same_retryable_patch_failure_repeats(self):
+        # Verifies that repeating the same retryable failure does not loop indefinitely.
+        # This catches recovery logic that keeps asking the model for the same broken patch output over and over.
+        # Failure is correct because the same search_not_found error happened twice, so the coordinator stops safely.
+        patch_action = AgentAction(
+            type=AgentActionType.PROPOSE_PATCH,
+            reason="Patch app.py",
+            step_id="step_1",
+            action_id="action_1_propose_patch_step_1",
+            target_files=("app.py",),
+        )
+        agent_core = _SequencedFakeAgentCore(
+            actions=[patch_action],
+            generated_patch=[
+                AgentPatchGenerationError("search_not_found", "SEARCH block did not match"),
+                AgentPatchGenerationError("search_not_found", "SEARCH block did not match"),
+            ],
+        )
+        runtime = _RecordingFakeRuntime()
+        coordinator = AgentCoreCoordinator(agent_core=agent_core, execution_runtime=runtime)
+        session = self._make_session_with_plan(
+            steps=[
+                AgentStep(
+                    step_id="step_1",
+                    kind="patch",
+                    description="Patch app.py",
+                    target_files=("app.py",),
+                )
+            ],
+            repo_context=RepoContextResult(
+                workspace_id=new_workspace_id(),
+                run_id=new_run_id(),
+                repo_map="app.py\n",
+                file_summaries=(
+                    FileSummary(path="app.py", summary="text file", content="before\n"),
+                ),
+            ),
+        )
+
+        outcome = await coordinator.run(session)
+
+        self.assertEqual(outcome.status, "failed")
+        self.assertEqual(len(outcome.session.failure_history), 2)
+        self.assertEqual(outcome.session.failure_history[0].code, "search_not_found")
+        self.assertTrue(outcome.session.failure_history[0].retryable)
+        self.assertEqual(outcome.session.failure_history[1].stage, "generate_patch")
+        self.assertEqual(runtime.calls, [])
+
+    async def test_coordinator_retries_post_apply_validation_failure_before_runtime_apply(self):
+        # Verifies that invalid post-apply Python syntax is caught before runtime patch application and can trigger one retry.
+        # This catches a dangerous path where malformed generated code would be applied to the workspace before basic validation.
+        # Completion is correct because the first patch makes invalid Python, the retry fixes it, and only the valid diff reaches apply_patch.
+        log: list[str] = []
+        patch_action = AgentAction(
+            type=AgentActionType.PROPOSE_PATCH,
+            reason="Patch app.py",
+            step_id="step_1",
+            action_id="action_1_propose_patch_step_1",
+            target_files=("app.py",),
+        )
+        invalid_patch = AgentAction(
+            type=AgentActionType.PROPOSE_PATCH,
+            reason="Patch app.py",
+            step_id="step_1",
+            action_id="action_1_propose_patch_step_1",
+            target_files=("app.py",),
+            patch_diff="--- a/app.py\n+++ b/app.py\n@@ -1,2 +1,2 @@\n-def add():\n-    return 1\n+def add(:\n+    return 1\n",
+        )
+        valid_patch = AgentAction(
+            type=AgentActionType.PROPOSE_PATCH,
+            reason="Patch app.py",
+            step_id="step_1",
+            action_id="action_1_propose_patch_step_1",
+            target_files=("app.py",),
+            patch_diff="--- a/app.py\n+++ b/app.py\n@@ -1,2 +1,2 @@\n def add():\n-    return 1\n+    return 2\n",
+        )
+        agent_core = _SequencedFakeAgentCore(
+            log=log,
+            actions=[
+                patch_action,
+                AgentAction(type=AgentActionType.COMPLETE, reason="done", summary_text="done"),
+            ],
+            generated_patch=[invalid_patch, valid_patch],
+            review=PatchReview(
+                accepted=True,
+                reason="Patch passed review",
+                changed_files=("app.py",),
+            ),
+        )
+        runtime = _RecordingFakeRuntime(log=log)
+        coordinator = AgentCoreCoordinator(agent_core=agent_core, execution_runtime=runtime)
+        session = self._make_session_with_plan(
+            steps=[
+                AgentStep(
+                    step_id="step_1",
+                    kind="patch",
+                    description="Patch app.py",
+                    target_files=("app.py",),
+                ),
+                AgentStep(step_id="step_2", kind="complete", description="Finish"),
+            ],
+            repo_context=RepoContextResult(
+                workspace_id=new_workspace_id(),
+                run_id=new_run_id(),
+                repo_map="app.py\n",
+                file_summaries=(
+                    FileSummary(
+                        path="app.py",
+                        summary="python file",
+                        language="python",
+                        content="def add():\n    return 1\n",
+                    ),
+                ),
+            ),
+        )
+
+        outcome = await coordinator.run(session)
+
+        self.assertEqual(outcome.status, "completed")
+        self.assertEqual(log.count("generate_patch"), 2)
+        self.assertEqual(runtime.calls.count("apply_patch"), 1)
+        self.assertEqual(outcome.session.failure_history[0].code, "post_apply_validation_failed")
+        self.assertTrue(outcome.session.failure_history[0].retryable)
 
     async def test_coordinator_returns_context_request_without_runtime_calls(self):
         # Verifies that ASK_CONTEXT short-circuits execution and returns the requested context directly.
@@ -441,6 +1224,29 @@ class TestAgentCoreCoordinator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(outcome.session.failure_history[-1].stage, "command")
         self.assertIn("runtime command exploded", outcome.session.failure_history[-1].message)
         self.assertEqual([action.type.value for action in outcome.session.action_history], ["run_command"])
+
+    async def test_coordinator_fails_loudly_when_command_generation_is_invalid(self):
+        # Verifies that command-generation failures stop execution before runtime dispatch and surface a dedicated failure stage.
+        # This catches permissive fallback behavior that would continue with an empty or malformed command payload.
+        # The generate_command failure is correct because no valid command_argv exists yet, so runtime execution cannot begin safely.
+        agent_core = _SequencedFakeAgentCore(
+            actions=[
+                AgentAction(
+                    type=AgentActionType.RUN_COMMAND,
+                    reason="Run targeted tests",
+                    target_files=("tests/unit/test_agent_core_runner.py",),
+                )
+            ],
+            generated_command=ValueError("malformed command json"),
+        )
+        runtime = _RecordingFakeRuntime()
+        coordinator = AgentCoreCoordinator(agent_core=agent_core, execution_runtime=runtime)
+
+        outcome = await coordinator.run(self._make_session())
+
+        self.assertEqual(outcome.status, "failed")
+        self.assertEqual(outcome.session.failure_history[-1].stage, "generate_command")
+        self.assertEqual(runtime.calls, [])
 
     async def test_coordinator_surfaces_structured_runtime_recovery_state(self):
         # Verifies that runtime recovery requirements become explicit needs_recovery outcomes instead of generic failures.

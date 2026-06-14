@@ -9,8 +9,8 @@ import subprocess
 import sys
 import unittest
 
-from packages.shared_types import RepoContextResult, TaskStatus, new_run_id, new_workspace_id
-from services.agent_core import FakeModelClient, LocalAgentCoreService
+from packages.shared_types import FileSummary, RepoContextResult, TaskStatus, new_run_id, new_workspace_id
+from services.agent_core import AgentFailure, FakeModelClient, LocalAgentCoreService
 from services.agent_core.models import AgentAction, AgentActionType, AgentPlan, AgentStep
 from services.agent_core.models import AgentSession
 from services.execution_runtime.local import LocalExecutionRuntimeService
@@ -179,6 +179,112 @@ class TestLocalAgentCoreService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(action.requested_context, ("services/agent_core/local.py",))
         self.assertEqual(action.target_files, ("services/agent_core/local.py",))
 
+    async def test_generate_patch_is_headless_and_uses_fake_model_client_only(self):
+        # Verifies that patch generation stays inside the model-client boundary and does not call runtime or mutate files.
+        # This catches accidental shell, filesystem, or execution-runtime side effects while generating a diff proposal.
+        # The generated patch is correct because this phase should only build a prompt, parse structured edit intent, and derive a diff in memory.
+        fake_model = FakeModelClient(
+            responses=[
+                {
+                    "path": "services/agent_core/local.py",
+                    "search": "def old():\n    return 'old'\n",
+                    "replace": "def old():\n    return 'new'\n",
+                }
+            ]
+        )
+        service = LocalAgentCoreService(model_client=fake_model)
+        run_id = new_run_id()
+        workspace_id = new_workspace_id()
+        session = service.create_session(
+            run_id=run_id,
+            workspace_id=workspace_id,
+            user_request="Generate a patch for local.py",
+            repo_context=RepoContextResult(
+                workspace_id=workspace_id,
+                run_id=run_id,
+                repo_map="services/\n  agent_core/",
+                file_summaries=(
+                    FileSummary(
+                        path="services/agent_core/local.py",
+                        summary="small python file",
+                        language="python",
+                        content="def old():\n    return 'old'\n",
+                    ),
+                ),
+            ),
+            current_plan=AgentPlan(
+                goal="Patch local.py",
+                steps=[
+                    AgentStep(
+                        kind="patch",
+                        description="Patch services/agent_core/local.py",
+                        target_files=("services/agent_core/local.py",),
+                    )
+                ],
+            ),
+        )
+        proposed_action = AgentAction(
+            type=AgentActionType.PROPOSE_PATCH,
+            reason="Patch services/agent_core/local.py",
+            step_id="step_1",
+            action_id="action_1_propose_patch_step_1",
+            target_files=("services/agent_core/local.py",),
+        )
+
+        with self._headless_side_effect_guards():
+            generated = await service.generate_patch(session, proposed_action)
+
+        self.assertIn("+++ b/services/agent_core/local.py", generated.patch_diff or "")
+        self.assertEqual(generated.action_id, proposed_action.action_id)
+
+    async def test_generate_command_is_headless_and_uses_fake_model_client_only(self):
+        # Verifies that command generation stays inside the model-client boundary and does not call runtime or mutate files.
+        # This catches accidental shell, filesystem, or execution-runtime side effects while generating command argv.
+        # The generated command is correct because this phase should only build a prompt and parse model JSON into a command action.
+        fake_model = FakeModelClient(
+            responses=[
+                {
+                    "command_argv": ["python", "-m", "unittest", "tests.unit.test_agent_core_local"],
+                    "cwd": ".",
+                }
+            ]
+        )
+        service = LocalAgentCoreService(model_client=fake_model)
+        run_id = new_run_id()
+        workspace_id = new_workspace_id()
+        session = service.create_session(
+            run_id=run_id,
+            workspace_id=workspace_id,
+            user_request="Generate a command for agent_core tests",
+            repo_context=self._make_repo_context(run_id, workspace_id),
+            current_plan=AgentPlan(
+                goal="Run tests",
+                steps=[
+                    AgentStep(
+                        kind="command",
+                        description="Run tests for agent_core local service",
+                        target_files=("tests/unit/test_agent_core_local.py",),
+                    )
+                ],
+            ),
+        )
+        proposed_action = AgentAction(
+            type=AgentActionType.RUN_COMMAND,
+            reason="Run tests for agent_core local service",
+            step_id="step_1",
+            action_id="action_1_run_command_step_1",
+            target_files=("tests/unit/test_agent_core_local.py",),
+        )
+
+        with self._headless_side_effect_guards():
+            generated = await service.generate_command(session, proposed_action)
+
+        self.assertEqual(
+            generated.command_argv,
+            ("python", "-m", "unittest", "tests.unit.test_agent_core_local"),
+        )
+        self.assertEqual(generated.cwd, ".")
+
     async def test_review_patch_and_summarize_run_are_headless(self):
         # Verifies that the new Phase F methods stay purely structural and do not print or execute.
         # This catches accidental shell, filesystem, or runtime side effects leaking into the agent_core boundary.
@@ -230,6 +336,124 @@ class TestLocalAgentCoreService(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(review.accepted)
         self.assertEqual(summary.final_status, "completed")
         self.assertEqual(summary.changed_files, ("services/agent_core/local.py",))
+
+    async def test_next_action_proposes_patch_after_retryable_command_failure(self):
+        # Verifies that retryable command failures are converted into a repair patch step instead of immediate approval escalation.
+        # This catches a broken recovery loop where verification failures are recorded but agent_core does not use the new context to attempt a fix.
+        # The patch targets are correct because repair prioritizes the refreshed repo context gathered around the failure.
+        service = LocalAgentCoreService()
+        run_id = new_run_id()
+        workspace_id = new_workspace_id()
+        session = service.create_session(
+            run_id=run_id,
+            workspace_id=workspace_id,
+            user_request="Fix the failing test",
+            repo_context=RepoContextResult(
+                workspace_id=workspace_id,
+                run_id=run_id,
+                file_summaries=(
+                    FileSummary(path="app.py", summary="helper definition"),
+                    FileSummary(path="tests/test_app.py", summary="failing test"),
+                ),
+            ),
+            current_plan=AgentPlan(
+                goal="Fix the failure",
+                steps=[
+                    AgentStep(
+                        step_id="step_1",
+                        kind="command",
+                        description="Run focused tests",
+                        target_files=("tests/test_app.py",),
+                    )
+                ],
+            ),
+            action_history=[
+                AgentAction(
+                    type=AgentActionType.RUN_COMMAND,
+                    reason="Run focused tests",
+                    step_id="step_1",
+                    action_id="action_1_run_command_step_1",
+                    target_files=("tests/test_app.py",),
+                    command_argv=("python", "-m", "pytest", "tests/test_app.py"),
+                )
+            ],
+            failure_history=[
+                AgentFailure(
+                    stage="command",
+                    message="Command failed with exit code 1",
+                    code="command_failed",
+                    retryable=True,
+                    details={"stderr": "NameError: helper_value is not defined"},
+                )
+            ],
+        )
+
+        with self._headless_side_effect_guards():
+            action = await service.next_action(session)
+
+        self.assertEqual(action.type, AgentActionType.PROPOSE_PATCH)
+        self.assertEqual(action.target_files, ("app.py", "tests/test_app.py"))
+        self.assertIn("failed verification command", action.reason)
+
+    async def test_next_action_reruns_last_command_after_retryable_failure_following_patch(self):
+        # Verifies that once a repair patch has been attempted, agent_core reruns the last failed command automatically.
+        # This catches a stalled repair loop where the system fixes files but never re-verifies them.
+        # Reusing the prior argv and cwd is correct because the failed verification command is the exact check that should gate completion.
+        service = LocalAgentCoreService()
+        run_id = new_run_id()
+        workspace_id = new_workspace_id()
+        session = service.create_session(
+            run_id=run_id,
+            workspace_id=workspace_id,
+            user_request="Fix the failing test",
+            repo_context=self._make_repo_context(run_id, workspace_id),
+            current_plan=AgentPlan(
+                goal="Fix the failure",
+                steps=[
+                    AgentStep(
+                        step_id="step_1",
+                        kind="command",
+                        description="Run focused tests",
+                        target_files=("tests/test_app.py",),
+                    )
+                ],
+            ),
+            action_history=[
+                AgentAction(
+                    type=AgentActionType.RUN_COMMAND,
+                    reason="Run focused tests",
+                    step_id="step_1",
+                    action_id="action_1_run_command_step_1",
+                    target_files=("tests/test_app.py",),
+                    command_argv=("python", "-m", "pytest", "tests/test_app.py"),
+                    cwd=".",
+                ),
+                AgentAction(
+                    type=AgentActionType.PROPOSE_PATCH,
+                    reason="Fix the helper usage",
+                    step_id="step_2",
+                    action_id="action_2_propose_patch_step_2",
+                    target_files=("app.py",),
+                    patch_diff="--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-helper_value = 0\n+helper_value = 1\n",
+                ),
+            ],
+            failure_history=[
+                AgentFailure(
+                    stage="command",
+                    message="Command failed with exit code 1",
+                    code="command_failed",
+                    retryable=True,
+                )
+            ],
+        )
+
+        with self._headless_side_effect_guards():
+            action = await service.next_action(session)
+
+        self.assertEqual(action.type, AgentActionType.RUN_COMMAND)
+        self.assertEqual(action.command_argv, ("python", "-m", "pytest", "tests/test_app.py"))
+        self.assertEqual(action.cwd, ".")
+        self.assertEqual(action.target_files, ("tests/test_app.py",))
 
     def test_agent_core_import_does_not_load_pyclaw_modules(self):
         # Verifies the import boundary behaviorally by checking what modules load during agent_core import.
