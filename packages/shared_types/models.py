@@ -188,7 +188,9 @@ class RepoContextRequest(SerializableModel):
     prompt: str | None = None
     task_id: TaskId | None = None
     target_paths: tuple[str, ...] = ()
+    reference_paths: tuple[str, ...] = ()
     max_files: int | None = None
+    auto_context_mentions: bool = True
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -196,8 +198,10 @@ class RepoContextResult(SerializableModel):
     workspace_id: WorkspaceId
     run_id: RunId
     file_summaries: tuple[FileSummary, ...] = ()
+    reference_file_summaries: tuple[FileSummary, ...] = ()
     repo_map: str | None = None
     symbols: tuple[SymbolMatch, ...] = ()
+    mentioned_paths: tuple[str, ...] = ()
     dependency_hints: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
     created_at: datetime = field(default_factory=utc_now)

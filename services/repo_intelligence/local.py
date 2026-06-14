@@ -32,6 +32,7 @@ MAX_SYMBOL_RESULTS = 50
 MAX_SNIPPET_LINES = 3
 MAX_SNIPPET_CHARS = 240
 IDENT_PATTERN = re.compile(r"\b[A-Za-z_][A-Za-z0-9_-]{2,}\b")
+FILE_MENTION_QUOTE_CHARS = "\"'`*_"
 GENERATED_OR_VENDOR_MARKERS = (
     "node_modules/",
     "vendor/",
@@ -287,38 +288,72 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
         workspace = self._require_workspace(request.workspace_id)
         warnings: list[str] = []
         git_repo, repo_io = self._open_git_repo(workspace)
+        available_files, inventory_warnings = self._list_workspace_files(workspace, git_repo)
+        warnings.extend(inventory_warnings)
+
+        root = Path(workspace.root_path)
+        requested_target_paths = tuple(request.target_paths)
+        requested_reference_paths = tuple(request.reference_paths)
+        mentioned_paths = ()
+        if request.auto_context_mentions and request.prompt:
+            mentioned_paths = self._find_prompt_file_mentions(
+                root,
+                request.prompt,
+                available_files,
+                existing_rel_paths=requested_target_paths + requested_reference_paths,
+            )
+        effective_target_paths = tuple(
+            dict.fromkeys((*requested_target_paths, *mentioned_paths))
+        )
 
         context_files, other_files, selection_warnings = self._select_context_files(
             workspace,
-            request.target_paths,
+            effective_target_paths,
             request.max_files,
             git_repo,
+            available_files=available_files,
         )
         warnings.extend(selection_warnings)
+        reference_files, reference_warnings = self._select_reference_files(
+            root,
+            requested_reference_paths,
+            exclude_rel_paths=effective_target_paths,
+        )
+        warnings.extend(reference_warnings)
+        reference_resolved = {path.resolve() for path in reference_files}
+        other_files = [
+            path for path in other_files
+            if path.resolve() not in reference_resolved
+        ]
 
         if git_repo is None:
             warnings.append(self._warning(ErrorCode.WORKSPACE_NOT_GIT_REPO, workspace.root_path))
         elif getattr(git_repo, "git_repo_error", None):
             warnings.append(self._warning(ErrorCode.REPO_INDEX_FAILED, str(git_repo.git_repo_error)))
 
-        root = Path(workspace.root_path)
-        requested_target_paths = tuple(request.target_paths)
         file_summaries = tuple(
             await self.summarize_files(
                 workspace,
                 tuple(self._rel_path(root, path) for path in context_files),
-                include_content_paths=requested_target_paths,
+                include_content_paths=effective_target_paths,
+            )
+        )
+        reference_file_summaries = tuple(
+            await self.summarize_files(
+                workspace,
+                tuple(self._rel_path(root, path) for path in reference_files),
+                include_content_paths=tuple(self._rel_path(root, path) for path in reference_files),
             )
         )
 
         repo_map = None
         if other_files:
             try:
-                mentioned_fnames = {Path(path).name for path in request.target_paths}
+                mentioned_fnames = {Path(path).name for path in (*effective_target_paths, *requested_reference_paths)}
                 mentioned_idents = set(IDENT_PATTERN.findall(request.prompt or ""))
                 repo_map = self._build_repo_map(
                     workspace,
-                    context_files,
+                    self._dedupe_paths([*context_files, *reference_files]),
                     other_files,
                     mentioned_fnames,
                     mentioned_idents,
@@ -333,7 +368,10 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
 
         dependency_hints = tuple(
             _filter_important_files(
-                [self._rel_path(root, path) for path in context_files + other_files]
+                [
+                    self._rel_path(root, path)
+                    for path in [*context_files, *reference_files, *other_files]
+                ]
             )[:10]
         )
 
@@ -343,7 +381,9 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
             workspace_id=request.workspace_id,
             run_id=request.run_id,
             file_summaries=file_summaries,
+            reference_file_summaries=reference_file_summaries,
             repo_map=repo_map,
+            mentioned_paths=mentioned_paths,
             dependency_hints=dependency_hints,
             warnings=tuple(warnings),
         )
@@ -682,9 +722,15 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
         target_paths: Sequence[str],
         max_files: int | None,
         git_repo: Any | None,
+        *,
+        available_files: Sequence[Path] | None = None,
     ) -> tuple[list[Path], list[Path], list[str]]:
         root = Path(workspace.root_path)
-        available_files, warnings = self._list_workspace_files(workspace, git_repo)
+        if available_files is None:
+            available_files, warnings = self._list_workspace_files(workspace, git_repo)
+        else:
+            available_files = list(available_files)
+            warnings = []
         available_by_resolved = {path.resolve(): path for path in available_files}
         ignore_spec = _load_gitignores(self._gitignore_paths(root))
 
@@ -741,6 +787,36 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
             )
 
         return context_files, other_files, warnings
+
+    def _select_reference_files(
+        self,
+        root: Path,
+        reference_paths: Sequence[str],
+        *,
+        exclude_rel_paths: Sequence[str] = (),
+    ) -> tuple[list[Path], list[str]]:
+        reference_files: list[Path] = []
+        warnings: list[str] = []
+        excluded = set(exclude_rel_paths)
+        ignore_spec = _load_gitignores(self._gitignore_paths(root))
+        for raw_path in reference_paths:
+            try:
+                path = self._resolve_workspace_member(root, raw_path)
+            except ErrorCodeContractError as exc:
+                warnings.append(self._warning(exc.error_code, raw_path))
+                continue
+
+            rel_path = self._rel_path(root, path)
+            if rel_path in excluded:
+                continue
+
+            warning = self._target_filter_warning(root, path, ignore_spec)
+            if warning is not None:
+                warnings.append(warning)
+                continue
+            reference_files.append(path)
+
+        return self._dedupe_paths(reference_files), warnings
 
     def _filter_workspace_files(
         self,
@@ -841,6 +917,51 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
             return []
         important_rel = _filter_important_files([self._rel_path(root, path) for path in files])
         return [path for path in files if self._rel_path(root, path) in important_rel]
+
+    def _find_prompt_file_mentions(
+        self,
+        root: Path,
+        prompt: str,
+        available_files: Sequence[Path],
+        *,
+        existing_rel_paths: Sequence[str] = (),
+    ) -> tuple[str, ...]:
+        words = self._prompt_words(prompt)
+        if not words:
+            return ()
+
+        normalized_words = {word.replace("\\", "/") for word in words}
+        existing_rel_path_set = set(existing_rel_paths)
+        existing_basenames = {Path(path).name for path in existing_rel_paths}
+        mentioned_rel_paths: set[str] = set()
+        basename_to_paths: dict[str, list[str]] = {}
+
+        for path in available_files:
+            rel_path = self._rel_path(root, path)
+            if rel_path in existing_rel_path_set:
+                continue
+
+            normalized_rel_path = rel_path.replace("\\", "/")
+            if normalized_rel_path in normalized_words:
+                mentioned_rel_paths.add(rel_path)
+
+            basename = Path(rel_path).name
+            if any(marker in basename for marker in (".", "_", "-")):
+                basename_to_paths.setdefault(basename, []).append(rel_path)
+
+        for basename, rel_paths in basename_to_paths.items():
+            if basename in existing_basenames:
+                continue
+            if len(rel_paths) == 1 and basename in words:
+                mentioned_rel_paths.add(rel_paths[0])
+
+        return tuple(sorted(mentioned_rel_paths))
+
+    def _prompt_words(self, prompt: str) -> set[str]:
+        words = {word for word in prompt.split() if word}
+        words = {word.rstrip(",.!;:?") for word in words}
+        words = {word.strip(FILE_MENTION_QUOTE_CHARS) for word in words}
+        return {word for word in words if word}
 
     def _build_repo_map(
         self,

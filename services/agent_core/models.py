@@ -54,6 +54,19 @@ class AgentContextBudget(SerializableModel):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class AgentVerification(SerializableModel):
+    kind: str = "py_compile"
+    verification_level: str | None = None
+    command_argv: tuple[str, ...] = ()
+    changed_files: tuple[str, ...] = ()
+    stdout: str = ""
+    stderr: str = ""
+    exit_code: int | None = None
+    failure_signature: str | None = None
+    trigger_action_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class AgentStep(SerializableModel):
     kind: str
     description: str
@@ -145,6 +158,7 @@ class AgentSession(SerializableModel):
     completed_action_ids: list[str] = field(default_factory=list)
     iteration_count: int = 0
     failure_history: list[AgentFailure] = field(default_factory=list)
+    verification_history: list[AgentVerification] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     context_budget: AgentContextBudget | None = None
     created_at: datetime = field(default_factory=utc_now)

@@ -25,6 +25,7 @@ from .models import (
     AgentSession,
     AgentSessionPhase,
     AgentStep,
+    AgentVerification,
 )
 from .validation import validate_session_basic_shape
 
@@ -103,6 +104,10 @@ def deserialize_agent_session_dict(payload: Mapping[str, Any]) -> AgentSession:
             _agent_failure_from_dict(item)
             for item in _require_mapping_list(payload.get("failure_history", []), "failure_history")
         ],
+        verification_history=[
+            _agent_verification_from_dict(item)
+            for item in _require_mapping_list(payload.get("verification_history", []), "verification_history")
+        ],
         warnings=_string_list(payload.get("warnings", []), "warnings"),
         context_budget=_context_budget_from_dict(context_budget_payload)
         if isinstance(context_budget_payload, Mapping)
@@ -168,6 +173,20 @@ def _agent_failure_from_dict(payload: Mapping[str, Any]) -> AgentFailure:
     )
 
 
+def _agent_verification_from_dict(payload: Mapping[str, Any]) -> AgentVerification:
+    return AgentVerification(
+        kind=str(payload.get("kind", "py_compile")),
+        verification_level=_optional_str(payload.get("verification_level")),
+        command_argv=tuple(_string_list(payload.get("command_argv", []), "command_argv")),
+        changed_files=tuple(_string_list(payload.get("changed_files", []), "changed_files")),
+        stdout=str(payload.get("stdout", "")),
+        stderr=str(payload.get("stderr", "")),
+        exit_code=_optional_int(payload.get("exit_code")),
+        failure_signature=_optional_str(payload.get("failure_signature")),
+        trigger_action_id=_optional_str(payload.get("trigger_action_id")),
+    )
+
+
 def _context_budget_from_dict(payload: Mapping[str, Any]) -> AgentContextBudget:
     return AgentContextBudget(
         max_input_tokens=_optional_int(payload.get("max_input_tokens")),
@@ -190,6 +209,18 @@ def _repo_context_from_dict(payload: Mapping[str, Any]) -> RepoContextResult:
             )
             for item in _require_mapping_list(payload.get("file_summaries", []), "file_summaries")
         ),
+        reference_file_summaries=tuple(
+            FileSummary(
+                path=str(item["path"]),
+                summary=_optional_str(item.get("summary")),
+                language=_optional_str(item.get("language")),
+                content=_optional_str(item.get("content")),
+            )
+            for item in _require_mapping_list(
+                payload.get("reference_file_summaries", []),
+                "reference_file_summaries",
+            )
+        ),
         repo_map=_optional_str(payload.get("repo_map")),
         symbols=tuple(
             SymbolMatch(
@@ -200,6 +231,7 @@ def _repo_context_from_dict(payload: Mapping[str, Any]) -> RepoContextResult:
             )
             for item in _require_mapping_list(payload.get("symbols", []), "symbols")
         ),
+        mentioned_paths=tuple(_string_list(payload.get("mentioned_paths", []), "mentioned_paths")),
         dependency_hints=tuple(_string_list(payload.get("dependency_hints", []), "dependency_hints")),
         warnings=tuple(_string_list(payload.get("warnings", []), "warnings")),
         created_at=_parse_datetime(payload.get("created_at")),

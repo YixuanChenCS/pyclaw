@@ -66,6 +66,19 @@ class TestAgentCoreBootstrap(unittest.TestCase):
         self.assertEqual(dict(config.api_keys), {"openai": "env-openai-key"})
         self.assertEqual(config.runtime_db_path, "/tmp/agent-runtime.sqlite3")
         self.assertEqual(config.stream_poll_interval, 0.2)
+        self.assertEqual(config.fallback_test_command, ())
+
+    def test_load_local_agent_runner_config_from_env_reads_fallback_test_command(self):
+        config = load_local_agent_runner_config_from_env(
+            {
+                "AGENT_CORE_FALLBACK_TEST_COMMAND": "python -m pytest tests/unit -k agent_core",
+            }
+        )
+
+        self.assertEqual(
+            config.fallback_test_command,
+            ("python", "-m", "pytest", "tests/unit", "-k", "agent_core"),
+        )
 
     def test_load_local_agent_runner_config_from_env_rejects_invalid_poll_interval(self):
         # Verifies that malformed bootstrap numeric config fails loudly instead of silently falling back.
@@ -146,6 +159,32 @@ execution_runtime:
         self.assertEqual(dict(config.api_keys), {"openai": "file-openai-key"})
         self.assertEqual(config.runtime_db_path, "/tmp/from-file.sqlite3")
         self.assertEqual(config.stream_poll_interval, 0.25)
+        self.assertEqual(config.fallback_test_command, ())
+
+    def test_load_local_agent_runner_config_from_file_reads_verification_fallback_command(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / ".pyclaw.conf.yml"
+            config_path.write_text(
+                """
+agent_core:
+  verification:
+    fallback_test_command:
+      - python
+      - -m
+      - pytest
+      - tests/unit
+execution_runtime:
+  db_path: /tmp/from-file.sqlite3
+""".strip(),
+                encoding="utf-8",
+            )
+
+            config = load_local_agent_runner_config_from_file(config_path)
+
+        self.assertEqual(
+            config.fallback_test_command,
+            ("python", "-m", "pytest", "tests/unit"),
+        )
 
     def test_resolve_local_agent_runner_config_applies_cli_over_file_over_env_over_default(self):
         # Verifies the full precedence chain: CLI overrides project config, project config overrides environment, and environment overrides defaults.
@@ -181,12 +220,17 @@ api_keys:
                     "openrouter_api_key": None,
                     "runtime_db_path": None,
                     "stream_poll_interval": None,
+                    "fallback_test_command": "python -m pytest tests/cli",
                 },
             )
 
         self.assertEqual(config.model.model, "openai/gpt-5-mini")
         self.assertEqual(config.model.system_prompt, "CLI prompt.")
         self.assertEqual(dict(config.api_keys), {"openai": "cli-openai-key"})
+        self.assertEqual(
+            config.fallback_test_command,
+            ("python", "-m", "pytest", "tests/cli"),
+        )
 
     def test_resolve_local_agent_runner_config_uses_file_over_env_when_cli_missing(self):
         # Verifies that project config beats environment variables when no CLI override is supplied.
@@ -247,6 +291,36 @@ api_keys:
         self.assertIs(stack.coordinator._execution_runtime, stack.execution_runtime)
         self.assertIs(stack.coordinator._agent_core, stack.agent_core)
         self.assertIs(stack.model_client.provider, dummy_provider)
+        self.assertEqual(
+            stack.agent_core._fallback_test_command,
+            (),
+        )
+
+    def test_build_local_agent_runner_stack_passes_fallback_test_command_to_agent_core(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = str(Path(tmpdir) / "runtime.sqlite3")
+            dummy_provider = _DummyProvider()
+
+            with patch(
+                "services.agent_core.bootstrap.LiteLLMProvider",
+                return_value=dummy_provider,
+            ):
+                stack = build_local_agent_runner_stack(
+                    config=LocalAgentRunnerConfig(
+                        model=AgentCoreModelConfig(
+                            provider="litellm",
+                            model="openai/gpt-4o-mini",
+                        ),
+                        runtime_db_path=db_path,
+                        fallback_test_command=("python", "-m", "pytest", "tests/unit"),
+                    ),
+                    repo_store=_RepoStore(),
+                )
+
+        self.assertEqual(
+            stack.agent_core._fallback_test_command,
+            ("python", "-m", "pytest", "tests/unit"),
+        )
 
     def test_build_local_agent_runner_stack_applies_provider_api_keys_to_environment(self):
         # Verifies that resolved provider-scoped API keys are pushed into the process environment before the real provider runs.

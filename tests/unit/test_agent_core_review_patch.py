@@ -9,7 +9,7 @@ from services.agent_core.validation import AgentStateValidationError
 
 
 class TestAgentCoreReviewPatch(unittest.IsolatedAsyncioTestCase):
-    def _make_session(self):
+    def _make_session(self, *, reference_paths=()):
         service = LocalAgentCoreService()
         run_id = new_run_id()
         workspace_id = new_workspace_id()
@@ -27,6 +27,10 @@ class TestAgentCoreReviewPatch(unittest.IsolatedAsyncioTestCase):
                         language="python",
                         content="def add(a, b):\n    # TODO: add comment\n    return a + b\n",
                     ),
+                ),
+                reference_file_summaries=tuple(
+                    FileSummary(path=path, summary="read-only reference", content="reference\n")
+                    for path in reference_paths
                 ),
             ),
         )
@@ -54,6 +58,49 @@ class TestAgentCoreReviewPatch(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(review.accepted)
         self.assertEqual(review.changed_files, ("services/agent_core/local.py",))
+
+    async def test_review_patch_rejects_read_only_reference_even_when_targeted(self):
+        service, session = self._make_session(reference_paths=("docs/spec.md",))
+        action = AgentAction(
+            type=AgentActionType.PROPOSE_PATCH,
+            reason="Update the reference",
+            target_files=("docs/spec.md",),
+            patch_diff=(
+                "--- a/docs/spec.md\n"
+                "+++ b/docs/spec.md\n"
+                "@@ -1 +1 @@\n"
+                "-reference\n"
+                "+changed\n"
+            ),
+        )
+
+        with self.assertRaises(AgentStateValidationError) as context:
+            await service.review_patch(session, action)
+
+        self.assertEqual(context.exception.failure_code, "read_only_reference_modified")
+        self.assertIn("docs/spec.md", str(context.exception))
+
+    async def test_review_patch_accepts_normal_target_with_read_only_context(self):
+        service, session = self._make_session(reference_paths=("docs/spec.md",))
+        action = AgentAction(
+            type=AgentActionType.PROPOSE_PATCH,
+            reason="Update normal target",
+            target_files=("math_utils.py",),
+            patch_diff=(
+                "--- a/math_utils.py\n"
+                "+++ b/math_utils.py\n"
+                "@@ -1,3 +1,3 @@\n"
+                " def add(a, b):\n"
+                "-    # TODO: add comment\n"
+                "+    # Normal editable target\n"
+                "     return a + b\n"
+            ),
+        )
+
+        review = await service.review_patch(session, action)
+
+        self.assertTrue(review.accepted)
+        self.assertEqual(review.changed_files, ("math_utils.py",))
 
     async def test_review_patch_rejects_empty_patch(self):
         # Verifies that missing patch content fails loudly instead of being treated as a no-op success.

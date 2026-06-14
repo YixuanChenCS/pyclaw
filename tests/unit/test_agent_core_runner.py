@@ -36,8 +36,9 @@ from services.agent_core import (
     LocalAgentCoreService,
     PatchReview,
     RunSummary,
+    AgentVerification,
 )
-from services.agent_core.validation import AgentPatchGenerationError
+from services.agent_core.validation import AgentPatchGenerationError, AgentPatchReviewError
 from services.agent_core.validation import MAX_AGENT_ITERATIONS
 from services.execution_runtime import LocalExecutionRuntimeService, SQLiteExecutionRuntimeRepository
 
@@ -49,12 +50,19 @@ class _SequencedFakeAgentCore:
         actions: list[AgentAction],
         generated_command: AgentAction | Exception | None = None,
         generated_patch: AgentAction | Exception | None = None,
-        review: PatchReview | Exception | None = None,
+        planned_verification: (
+            AgentVerification
+            | tuple[AgentVerification, ...]
+            | list[AgentVerification | tuple[AgentVerification, ...] | None]
+            | None
+        ) = None,
+        review: PatchReview | Exception | list[PatchReview | Exception] | None = None,
         log: list[str] | None = None,
     ) -> None:
         self._actions = list(actions)
         self._generated_command = generated_command
         self._generated_patch = generated_patch
+        self._planned_verification = planned_verification
         self._review = review or PatchReview(accepted=True, reason="ok", changed_files=("app.py",))
         self._log = log if log is not None else []
 
@@ -98,9 +106,28 @@ class _SequencedFakeAgentCore:
 
     async def review_patch(self, session, proposed_action):
         self._log.append("review_patch")
-        if isinstance(self._review, Exception):
-            raise self._review
-        return self._review
+        review = self._review
+        if isinstance(review, list):
+            if not review:
+                raise AssertionError("No more fake review responses available")
+            review = review.pop(0)
+        if isinstance(review, Exception):
+            raise review
+        return review
+
+    def plan_patch_verification(self, session, *, changed_files, deleted_files=(), workspace_root=None):
+        del session, changed_files, deleted_files, workspace_root
+        self._log.append("plan_patch_verification")
+        planned = self._planned_verification
+        if isinstance(planned, list):
+            if not planned:
+                raise AssertionError("No more fake planned_verification responses available")
+            planned = planned.pop(0)
+        if planned is None:
+            return ()
+        if isinstance(planned, AgentVerification):
+            return (planned,)
+        return planned
 
     async def summarize_run(self, session):
         self._log.append("summarize_run")
@@ -402,6 +429,7 @@ class TestAgentCoreCoordinator(unittest.IsolatedAsyncioTestCase):
                 "next_action:propose_patch",
                 "review_patch",
                 "apply_patch",
+                "plan_patch_verification",
                 "next_action:run_command",
                 "execute_command",
                 "next_action:complete",
@@ -543,6 +571,7 @@ class TestAgentCoreCoordinator(unittest.IsolatedAsyncioTestCase):
                 "save_agent_session",
                 "review_patch",
                 "apply_patch",
+                "plan_patch_verification",
                 "save_agent_session",
                 "next_action:complete",
                 "save_agent_session",
@@ -645,6 +674,7 @@ class TestAgentCoreCoordinator(unittest.IsolatedAsyncioTestCase):
             "refresh_index",
             "analyze_impact",
             "build_context",
+            "plan_patch_verification",
             "save_agent_session",
             "next_action:complete",
             "save_agent_session",
@@ -729,6 +759,469 @@ class TestAgentCoreCoordinator(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(outcome.status, "completed")
         self.assertIn("repo_intelligence refresh after patch failed", outcome.session.warnings[0])
+
+    async def test_successful_patch_triggers_automatic_py_compile_verification(self):
+        # Verifies that a successful patch automatically runs deterministic Python syntax verification for changed Python files.
+        # This catches regressions where post-patch verification is skipped and syntax errors are only discovered in later manual checks.
+        # The py_compile argv is correct because this phase only compiles the changed Python files and uses a fixed deterministic command.
+        log: list[str] = []
+        run_id = new_run_id()
+        agent_core = _SequencedFakeAgentCore(
+            log=log,
+            actions=[
+                AgentAction(
+                    type=AgentActionType.PROPOSE_PATCH,
+                    reason="Patch Python files",
+                    step_id="step_1",
+                    action_id="action_1_propose_patch_step_1",
+                    target_files=("app.py", "pkg/module.py"),
+                    patch_diff=(
+                        "--- a/app.py\n"
+                        "+++ b/app.py\n"
+                        "@@ -1 +1 @@\n"
+                        "-old\n"
+                        "+new\n"
+                        "--- a/pkg/module.py\n"
+                        "+++ b/pkg/module.py\n"
+                        "@@ -1 +1 @@\n"
+                        "-old\n"
+                        "+new\n"
+                    ),
+                ),
+                AgentAction(
+                    type=AgentActionType.COMPLETE,
+                    reason="Run complete",
+                    summary_text="Everything succeeded",
+                ),
+            ],
+            planned_verification=AgentVerification(
+                command_argv=("python", "-m", "py_compile", "app.py", "pkg/module.py"),
+                changed_files=("app.py", "pkg/module.py"),
+            ),
+            review=PatchReview(
+                accepted=True,
+                reason="Patch passed review",
+                changed_files=("app.py", "pkg/module.py"),
+                patch_diff=(
+                    "--- a/app.py\n"
+                    "+++ b/app.py\n"
+                    "@@ -1 +1 @@\n"
+                    "-old\n"
+                    "+new\n"
+                    "--- a/pkg/module.py\n"
+                    "+++ b/pkg/module.py\n"
+                    "@@ -1 +1 @@\n"
+                    "-old\n"
+                    "+new\n"
+                ),
+            ),
+        )
+        runtime = _RecordingFakeRuntime(
+            command_results=[
+                CommandResult(run_id=run_id, task_id="task_verify", exit_code=0, stdout=""),
+            ],
+            log=log,
+        )
+        session_store = _RecordingSessionStore(log=log)
+        coordinator = AgentCoreCoordinator(
+            agent_core=agent_core,
+            execution_runtime=runtime,
+            session_store=session_store,
+        )
+
+        outcome = await coordinator.run(self._make_session())
+
+        self.assertEqual(outcome.status, "completed")
+        self.assertEqual(runtime.calls, ["apply_patch", "execute_command", "finalize_run"])
+        self.assertEqual(
+            runtime.command_requests[0].argv,
+            ("python", "-m", "py_compile", "app.py", "pkg/module.py"),
+        )
+        self.assertEqual(
+            outcome.session.verification_history[-1].changed_files,
+            ("app.py", "pkg/module.py"),
+        )
+        self.assertEqual(outcome.session.verification_history[-1].exit_code, 0)
+        self.assertEqual(outcome.session.verification_history[-1].verification_level, "syntax_only")
+
+    async def test_successful_patch_runs_targeted_pytest_after_syntax_verification(self):
+        # Verifies that deterministic targeted tests run only after syntax verification succeeds.
+        # This catches a regression where py_compile would pass but the related focused unit test would never execute.
+        # The two-command sequence is correct because this phase should run syntax verification first, then a single allowlisted pytest command for the matched test file.
+        log: list[str] = []
+        run_id = new_run_id()
+        patch_diff = "--- a/services/agent_core/runner.py\n+++ b/services/agent_core/runner.py\n@@ -1 +1 @@\n-old\n+new\n"
+        agent_core = _SequencedFakeAgentCore(
+            log=log,
+            actions=[
+                AgentAction(
+                    type=AgentActionType.PROPOSE_PATCH,
+                    reason="Patch runner.py",
+                    step_id="step_1",
+                    action_id="action_1_propose_patch_step_1",
+                    target_files=("services/agent_core/runner.py",),
+                    patch_diff=patch_diff,
+                ),
+                AgentAction(
+                    type=AgentActionType.COMPLETE,
+                    reason="Run complete",
+                    summary_text="Everything succeeded",
+                ),
+            ],
+            planned_verification=(
+                AgentVerification(
+                    verification_level="syntax_only",
+                    command_argv=("python", "-m", "py_compile", "services/agent_core/runner.py"),
+                    changed_files=("services/agent_core/runner.py",),
+                ),
+                AgentVerification(
+                    kind="targeted_pytest",
+                    verification_level="targeted_tests_passed",
+                    command_argv=("python", "-m", "pytest", "tests/unit/test_agent_core_runner.py"),
+                    changed_files=("services/agent_core/runner.py",),
+                ),
+            ),
+            review=PatchReview(
+                accepted=True,
+                reason="Patch passed review",
+                changed_files=("services/agent_core/runner.py",),
+                patch_diff=patch_diff,
+            ),
+        )
+        runtime = _RecordingFakeRuntime(
+            command_results=[
+                CommandResult(run_id=run_id, task_id="task_syntax", exit_code=0),
+                CommandResult(run_id=run_id, task_id="task_targeted", exit_code=0, stdout="1 passed"),
+            ],
+            log=log,
+        )
+        coordinator = AgentCoreCoordinator(agent_core=agent_core, execution_runtime=runtime)
+
+        outcome = await coordinator.run(self._make_session())
+
+        self.assertEqual(outcome.status, "completed")
+        self.assertEqual(
+            runtime.calls,
+            ["apply_patch", "execute_command", "execute_command", "finalize_run"],
+        )
+        self.assertEqual(
+            [request.argv for request in runtime.command_requests],
+            [
+                ("python", "-m", "py_compile", "services/agent_core/runner.py"),
+                ("python", "-m", "pytest", "tests/unit/test_agent_core_runner.py"),
+            ],
+        )
+        self.assertEqual(
+            [item.verification_level for item in outcome.session.verification_history],
+            ["syntax_only", "targeted_tests_passed"],
+        )
+
+    async def test_patch_without_matching_test_records_functional_verification_missing(self):
+        # Verifies that syntax verification without any matched focused test does not claim full functional coverage.
+        # This catches an overconfident success state where py_compile alone would be treated as equivalent to targeted test validation.
+        # Recording a non-command functional-verification gap is correct because the syntax check passed but no deterministic test file was found.
+        run_id = new_run_id()
+        patch_diff = "--- a/docs/readme_helper.py\n+++ b/docs/readme_helper.py\n@@ -1 +1 @@\n-old\n+new\n"
+        agent_core = _SequencedFakeAgentCore(
+            actions=[
+                AgentAction(
+                    type=AgentActionType.PROPOSE_PATCH,
+                    reason="Patch helper without focused tests",
+                    step_id="step_1",
+                    action_id="action_1_propose_patch_step_1",
+                    target_files=("docs/readme_helper.py",),
+                    patch_diff=patch_diff,
+                ),
+                AgentAction(
+                    type=AgentActionType.COMPLETE,
+                    reason="Run complete",
+                    summary_text="Everything succeeded",
+                ),
+            ],
+            planned_verification=(
+                AgentVerification(
+                    verification_level="syntax_only",
+                    command_argv=("python", "-m", "py_compile", "docs/readme_helper.py"),
+                    changed_files=("docs/readme_helper.py",),
+                ),
+                AgentVerification(
+                    kind="functional_verification_missing",
+                    verification_level="functional_verification_missing",
+                    changed_files=("docs/readme_helper.py",),
+                ),
+            ),
+            review=PatchReview(
+                accepted=True,
+                reason="Patch passed review",
+                changed_files=("docs/readme_helper.py",),
+                patch_diff=patch_diff,
+            ),
+        )
+        runtime = _RecordingFakeRuntime(
+            command_results=[
+                CommandResult(run_id=run_id, task_id="task_syntax", exit_code=0),
+            ],
+        )
+        coordinator = AgentCoreCoordinator(agent_core=agent_core, execution_runtime=runtime)
+
+        outcome = await coordinator.run(self._make_session())
+
+        self.assertEqual(outcome.status, "completed")
+        self.assertEqual(runtime.calls, ["apply_patch", "execute_command", "finalize_run"])
+        self.assertEqual(len(outcome.session.verification_history), 2)
+        self.assertEqual(
+            [item.verification_level for item in outcome.session.verification_history],
+            ["syntax_only", "functional_verification_missing"],
+        )
+        self.assertEqual(outcome.session.verification_history[1].command_argv, ())
+
+    async def test_configured_fallback_runs_when_functional_verification_is_missing(self):
+        # Verifies that an explicit allowlisted fallback test command runs after syntax verification when no deterministic targeted test was found.
+        # This catches the gap where legacy-style explicit test configuration would be ignored and the run would stop at syntax_only.
+        # The verification sequence is correct because syntax must run first and the configured fallback pytest command is the only functional check available.
+        run_id = new_run_id()
+        patch_diff = "--- a/docs/readme_helper.py\n+++ b/docs/readme_helper.py\n@@ -1 +1 @@\n-old\n+new\n"
+        agent_core = _SequencedFakeAgentCore(
+            actions=[
+                AgentAction(
+                    type=AgentActionType.PROPOSE_PATCH,
+                    reason="Patch helper without targeted tests",
+                    step_id="step_1",
+                    action_id="action_1_propose_patch_step_1",
+                    target_files=("docs/readme_helper.py",),
+                    patch_diff=patch_diff,
+                ),
+                AgentAction(
+                    type=AgentActionType.COMPLETE,
+                    reason="Run complete",
+                    summary_text="Everything succeeded",
+                ),
+            ],
+            planned_verification=(
+                AgentVerification(
+                    verification_level="syntax_only",
+                    command_argv=("python", "-m", "py_compile", "docs/readme_helper.py"),
+                    changed_files=("docs/readme_helper.py",),
+                ),
+                AgentVerification(
+                    kind="fallback_pytest",
+                    verification_level="fallback_tests_passed",
+                    command_argv=("python", "-m", "pytest", "tests/unit"),
+                    changed_files=("docs/readme_helper.py",),
+                ),
+            ),
+            review=PatchReview(
+                accepted=True,
+                reason="Patch passed review",
+                changed_files=("docs/readme_helper.py",),
+                patch_diff=patch_diff,
+            ),
+        )
+        runtime = _RecordingFakeRuntime(
+            command_results=[
+                CommandResult(run_id=run_id, task_id="task_syntax", exit_code=0),
+                CommandResult(run_id=run_id, task_id="task_fallback", exit_code=0, stdout="2 passed"),
+            ],
+        )
+        coordinator = AgentCoreCoordinator(agent_core=agent_core, execution_runtime=runtime)
+
+        outcome = await coordinator.run(self._make_session())
+
+        self.assertEqual(outcome.status, "completed")
+        self.assertEqual(
+            [request.argv for request in runtime.command_requests],
+            [
+                ("python", "-m", "py_compile", "docs/readme_helper.py"),
+                ("python", "-m", "pytest", "tests/unit"),
+            ],
+        )
+        self.assertEqual(
+            [item.verification_level for item in outcome.session.verification_history],
+            ["syntax_only", "fallback_tests_passed"],
+        )
+
+    async def test_disallowed_fallback_is_rejected_without_runtime_execution(self):
+        # Verifies that an invalid explicit fallback command is rejected before reaching the execution runtime.
+        # This catches a dangerous regression where arbitrary configured commands could bypass the new allowlist through the verification path.
+        # Skipping execution is correct because the configured command is missing a pytest target path and therefore is not an allowed fallback form.
+        run_id = new_run_id()
+        patch_diff = "--- a/docs/readme_helper.py\n+++ b/docs/readme_helper.py\n@@ -1 +1 @@\n-old\n+new\n"
+        agent_core = _SequencedFakeAgentCore(
+            actions=[
+                AgentAction(
+                    type=AgentActionType.PROPOSE_PATCH,
+                    reason="Patch helper without targeted tests",
+                    step_id="step_1",
+                    action_id="action_1_propose_patch_step_1",
+                    target_files=("docs/readme_helper.py",),
+                    patch_diff=patch_diff,
+                ),
+                AgentAction(
+                    type=AgentActionType.COMPLETE,
+                    reason="Run complete",
+                    summary_text="Everything succeeded",
+                ),
+            ],
+            planned_verification=(
+                AgentVerification(
+                    verification_level="syntax_only",
+                    command_argv=("python", "-m", "py_compile", "docs/readme_helper.py"),
+                    changed_files=("docs/readme_helper.py",),
+                ),
+                AgentVerification(
+                    kind="fallback_pytest",
+                    verification_level="fallback_tests_passed",
+                    command_argv=("python", "-m", "pytest"),
+                    changed_files=("docs/readme_helper.py",),
+                ),
+            ),
+            review=PatchReview(
+                accepted=True,
+                reason="Patch passed review",
+                changed_files=("docs/readme_helper.py",),
+                patch_diff=patch_diff,
+            ),
+        )
+        runtime = _RecordingFakeRuntime(
+            command_results=[
+                CommandResult(run_id=run_id, task_id="task_syntax", exit_code=0),
+            ],
+        )
+        coordinator = AgentCoreCoordinator(agent_core=agent_core, execution_runtime=runtime)
+
+        outcome = await coordinator.run(self._make_session())
+
+        self.assertEqual(outcome.status, "completed")
+        self.assertEqual(runtime.calls, ["apply_patch", "execute_command", "finalize_run"])
+        self.assertEqual(len(outcome.session.verification_history), 2)
+        self.assertEqual(outcome.session.verification_history[1].kind, "fallback_pytest_rejected")
+        self.assertEqual(
+            outcome.session.verification_history[1].verification_level,
+            "functional_verification_missing",
+        )
+        self.assertIn("Fallback test command rejected", outcome.session.warnings[-1])
+
+    async def test_fallback_failure_reuses_repair_loop(self):
+        # Verifies that an explicit fallback pytest failure enters the same repair loop as other verification failures.
+        # This catches a split path where fallback tests would fail but never feed stderr back into repo_intelligence and repair generation.
+        # The repair sequence is correct because the agent should rerun syntax verification and the same fallback command after applying a fix.
+        workspace = Workspace(root_path="/tmp/agent-core-runner-fallback-test")
+        run_id = new_run_id()
+        patch_diff = "--- a/docs/readme_helper.py\n+++ b/docs/readme_helper.py\n@@ -1 +1 @@\n-old\n+new\n"
+        repo_intelligence = _RecordingRepoIntelligence(
+            refreshed_context=RepoContextResult(
+                workspace_id=workspace.workspace_id,
+                run_id=run_id,
+                repo_map="refreshed repo map",
+                file_summaries=(FileSummary(path="docs/readme_helper.py", summary="repair target", content="def ok():\n    return 1\n"),),
+            ),
+            impact_analysis=ImpactAnalysis(
+                changed_paths=("docs/readme_helper.py",),
+                impacted_paths=("docs/readme_helper.py",),
+            ),
+        )
+        agent_core = _SequencedFakeAgentCore(
+            actions=[
+                AgentAction(
+                    type=AgentActionType.PROPOSE_PATCH,
+                    reason="Patch helper without targeted tests",
+                    step_id="step_1",
+                    action_id="action_1_propose_patch_step_1",
+                    target_files=("docs/readme_helper.py",),
+                    patch_diff=patch_diff,
+                ),
+                AgentAction(
+                    type=AgentActionType.PROPOSE_PATCH,
+                    reason="Repair helper after fallback failure",
+                    step_id="step_2",
+                    action_id="action_2_propose_patch_step_2",
+                    target_files=("docs/readme_helper.py",),
+                    patch_diff=patch_diff,
+                ),
+                AgentAction(
+                    type=AgentActionType.COMPLETE,
+                    reason="Run complete",
+                    summary_text="Everything succeeded",
+                ),
+            ],
+            planned_verification=[
+                (
+                    AgentVerification(
+                        verification_level="syntax_only",
+                        command_argv=("python", "-m", "py_compile", "docs/readme_helper.py"),
+                        changed_files=("docs/readme_helper.py",),
+                    ),
+                    AgentVerification(
+                        kind="fallback_pytest",
+                        verification_level="fallback_tests_passed",
+                        command_argv=("python", "-m", "pytest", "tests/unit"),
+                        changed_files=("docs/readme_helper.py",),
+                    ),
+                ),
+                (
+                    AgentVerification(
+                        verification_level="syntax_only",
+                        command_argv=("python", "-m", "py_compile", "docs/readme_helper.py"),
+                        changed_files=("docs/readme_helper.py",),
+                    ),
+                    AgentVerification(
+                        kind="fallback_pytest",
+                        verification_level="fallback_tests_passed",
+                        command_argv=("python", "-m", "pytest", "tests/unit"),
+                        changed_files=("docs/readme_helper.py",),
+                    ),
+                ),
+            ],
+            review=PatchReview(
+                accepted=True,
+                reason="Patch passed review",
+                changed_files=("docs/readme_helper.py",),
+                patch_diff=patch_diff,
+            ),
+        )
+        runtime = _RecordingFakeRuntime(
+            command_results=[
+                CommandResult(run_id=run_id, task_id="task_syntax_1", exit_code=0),
+                CommandResult(run_id=run_id, task_id="task_fallback_1", exit_code=1, stderr="AssertionError: fallback failed"),
+                CommandResult(run_id=run_id, task_id="task_syntax_2", exit_code=0),
+                CommandResult(run_id=run_id, task_id="task_fallback_2", exit_code=0, stdout="2 passed"),
+            ],
+        )
+        coordinator = AgentCoreCoordinator(
+            agent_core=agent_core,
+            execution_runtime=runtime,
+            session_store=_RecordingSessionStore(),
+            repo_intelligence=repo_intelligence,
+            repo_store=_InMemoryRepoStore({str(workspace.workspace_id): workspace}),
+        )
+        session = LocalAgentCoreService().create_session(
+            run_id=run_id,
+            workspace_id=workspace.workspace_id,
+            user_request="Patch helper and use configured fallback tests",
+            repo_context=RepoContextResult(
+                workspace_id=workspace.workspace_id,
+                run_id=run_id,
+                repo_map="stale repo map",
+                file_summaries=(FileSummary(path="docs/readme_helper.py", summary="before patch", content="old\n"),),
+            ),
+            current_plan=AgentPlan(
+                goal="Patch and verify",
+                steps=[
+                    AgentStep(step_id="step_1", kind="patch", description="Patch helper", target_files=("docs/readme_helper.py",)),
+                    AgentStep(step_id="step_2", kind="patch", description="Repair helper", target_files=("docs/readme_helper.py",)),
+                    AgentStep(step_id="step_3", kind="complete", description="Finish"),
+                ],
+            ),
+        )
+
+        outcome = await coordinator.run(session)
+
+        self.assertEqual(outcome.status, "completed")
+        failed_verification = next(
+            item for item in outcome.session.verification_history if item.exit_code == 1
+        )
+        self.assertEqual(failed_verification.verification_level, "fallback_tests_failed")
+        self.assertFalse(any(failure.stage == "command" for failure in outcome.session.failure_history))
 
     async def test_coordinator_records_command_failure_context_and_continues_repair_loop(self):
         # Verifies that nonzero command exits are recorded as retryable failures, enriched with repo intelligence, and kept in-loop for repair.
@@ -884,6 +1377,294 @@ class TestAgentCoreCoordinator(unittest.IsolatedAsyncioTestCase):
         self.assertIn("context warning", failure_snapshot.warnings)
         self.assertFalse(any(failure.stage == "command" for failure in outcome.session.failure_history))
 
+    async def test_auto_verification_failure_records_state_and_enters_repair_loop(self):
+        # Verifies that automatic post-patch verification failures are recorded structurally and feed the existing repair loop.
+        # This catches a gap where post-patch py_compile failures would be lost or would stop without creating repairable session state.
+        # The repair sequence is correct because the failed verification should produce a retryable command failure, trigger a repair patch, then rerun verification.
+        log: list[str] = []
+        workspace = Workspace(root_path="/tmp/agent-core-runner-auto-verify")
+        run_id = new_run_id()
+        repo_intelligence = _RecordingRepoIntelligence(
+            refreshed_context=RepoContextResult(
+                workspace_id=workspace.workspace_id,
+                run_id=run_id,
+                repo_map="refreshed repo map",
+                file_summaries=(
+                    FileSummary(path="app.py", summary="syntax fix target", content="def ok():\n    return 1\n"),
+                ),
+                warnings=("context warning",),
+            ),
+            impact_analysis=ImpactAnalysis(
+                changed_paths=("app.py",),
+                impacted_paths=("app.py",),
+                warnings=("impact warning",),
+            ),
+            symbol_matches=(SymbolMatch(name="ok", kind="function", path="app.py", line=1),),
+            log=log,
+        )
+        patch_diff = "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-old\n+new\n"
+        agent_core = _SequencedFakeAgentCore(
+            log=log,
+            actions=[
+                AgentAction(
+                    type=AgentActionType.PROPOSE_PATCH,
+                    reason="Patch app.py",
+                    step_id="step_1",
+                    action_id="action_1_propose_patch_step_1",
+                    target_files=("app.py",),
+                    patch_diff=patch_diff,
+                ),
+                AgentAction(
+                    type=AgentActionType.PROPOSE_PATCH,
+                    reason="Repair syntax in app.py",
+                    step_id="step_2",
+                    action_id="action_2_propose_patch_step_2",
+                    target_files=("app.py",),
+                    patch_diff=patch_diff,
+                ),
+                AgentAction(
+                    type=AgentActionType.COMPLETE,
+                    reason="Run complete",
+                    summary_text="Everything succeeded",
+                ),
+            ],
+            planned_verification=[
+                AgentVerification(
+                    command_argv=("python", "-m", "py_compile", "app.py"),
+                    changed_files=("app.py",),
+                ),
+                AgentVerification(
+                    command_argv=("python", "-m", "py_compile", "app.py"),
+                    changed_files=("app.py",),
+                ),
+            ],
+            review=PatchReview(
+                accepted=True,
+                reason="Patch passed review",
+                changed_files=("app.py",),
+                patch_diff=patch_diff,
+            ),
+        )
+        runtime = _RecordingFakeRuntime(
+            command_results=[
+                CommandResult(
+                    run_id=run_id,
+                    task_id="task_verify_fail",
+                    exit_code=1,
+                    stderr="SyntaxError: invalid syntax",
+                ),
+                CommandResult(
+                    run_id=run_id,
+                    task_id="task_verify_pass",
+                    exit_code=0,
+                    stdout="",
+                ),
+            ],
+            log=log,
+        )
+        session_store = _RecordingSessionStore(log=log)
+        coordinator = AgentCoreCoordinator(
+            agent_core=agent_core,
+            execution_runtime=runtime,
+            session_store=session_store,
+            repo_intelligence=repo_intelligence,
+            repo_store=_InMemoryRepoStore({str(workspace.workspace_id): workspace}),
+        )
+        session = LocalAgentCoreService().create_session(
+            run_id=run_id,
+            workspace_id=workspace.workspace_id,
+            user_request="Patch app.py and keep it syntactically valid",
+            repo_context=RepoContextResult(
+                workspace_id=workspace.workspace_id,
+                run_id=run_id,
+                repo_map="stale repo map",
+                file_summaries=(FileSummary(path="app.py", summary="before patch", content="old\n"),),
+            ),
+            current_plan=AgentPlan(
+                goal="Patch and verify",
+                steps=[
+                    AgentStep(step_id="step_1", kind="patch", description="Patch app.py", target_files=("app.py",)),
+                    AgentStep(step_id="step_2", kind="patch", description="Repair syntax in app.py", target_files=("app.py",)),
+                    AgentStep(step_id="step_3", kind="complete", description="Finish"),
+                ],
+            ),
+        )
+
+        outcome = await coordinator.run(session)
+
+        self.assertEqual(outcome.status, "completed")
+        self.assertEqual(
+            runtime.calls,
+            ["apply_patch", "execute_command", "apply_patch", "execute_command", "finalize_run"],
+        )
+        self.assertEqual(
+            outcome.session.verification_history[-1].command_argv,
+            ("python", "-m", "py_compile", "app.py"),
+        )
+        self.assertEqual(outcome.session.verification_history[-1].exit_code, 0)
+        self.assertFalse(any(failure.stage == "command" for failure in outcome.session.failure_history))
+
+        failure_snapshot = next(
+            snapshot
+            for snapshot in session_store.saved_sessions
+            if snapshot.verification_history and snapshot.verification_history[-1].exit_code == 1
+        )
+        self.assertEqual(
+            failure_snapshot.verification_history[-1].stderr,
+            "SyntaxError: invalid syntax",
+        )
+        self.assertEqual(
+            failure_snapshot.verification_history[-1].changed_files,
+            ("app.py",),
+        )
+        self.assertTrue(failure_snapshot.verification_history[-1].failure_signature)
+        self.assertEqual(failure_snapshot.failure_history[-1].stage, "command")
+        self.assertTrue(failure_snapshot.failure_history[-1].retryable)
+        self.assertEqual(
+            failure_snapshot.failure_history[-1].details["stderr"],
+            "SyntaxError: invalid syntax",
+        )
+
+    async def test_targeted_test_failure_reuses_repair_loop(self):
+        # Verifies that a focused pytest failure after passing syntax verification reuses the same repair loop.
+        # This catches a split-brain verification flow where targeted tests would fail outside the structured retryable command path.
+        # The repair cycle is correct because the agent should fix the changed source file, rerun syntax verification, then rerun the same focused test.
+        workspace = Workspace(root_path="/tmp/agent-core-runner-targeted-test")
+        run_id = new_run_id()
+        patch_diff = "--- a/services/agent_core/runner.py\n+++ b/services/agent_core/runner.py\n@@ -1 +1 @@\n-old\n+new\n"
+        repo_intelligence = _RecordingRepoIntelligence(
+            refreshed_context=RepoContextResult(
+                workspace_id=workspace.workspace_id,
+                run_id=run_id,
+                repo_map="refreshed repo map",
+                file_summaries=(
+                    FileSummary(path="services/agent_core/runner.py", summary="repair target", content="def ok():\n    return 1\n"),
+                    FileSummary(path="tests/unit/test_agent_core_runner.py", summary="focused test"),
+                ),
+            ),
+            impact_analysis=ImpactAnalysis(
+                changed_paths=("services/agent_core/runner.py",),
+                impacted_paths=("services/agent_core/runner.py", "tests/unit/test_agent_core_runner.py"),
+            ),
+            log=[],
+        )
+        agent_core = _SequencedFakeAgentCore(
+            actions=[
+                AgentAction(
+                    type=AgentActionType.PROPOSE_PATCH,
+                    reason="Patch runner.py",
+                    step_id="step_1",
+                    action_id="action_1_propose_patch_step_1",
+                    target_files=("services/agent_core/runner.py",),
+                    patch_diff=patch_diff,
+                ),
+                AgentAction(
+                    type=AgentActionType.PROPOSE_PATCH,
+                    reason="Repair runner.py",
+                    step_id="step_2",
+                    action_id="action_2_propose_patch_step_2",
+                    target_files=("services/agent_core/runner.py",),
+                    patch_diff=patch_diff,
+                ),
+                AgentAction(
+                    type=AgentActionType.COMPLETE,
+                    reason="Run complete",
+                    summary_text="Everything succeeded",
+                ),
+            ],
+            planned_verification=[
+                (
+                    AgentVerification(
+                        verification_level="syntax_only",
+                        command_argv=("python", "-m", "py_compile", "services/agent_core/runner.py"),
+                        changed_files=("services/agent_core/runner.py",),
+                    ),
+                    AgentVerification(
+                        kind="targeted_pytest",
+                        verification_level="targeted_tests_passed",
+                        command_argv=("python", "-m", "pytest", "tests/unit/test_agent_core_runner.py"),
+                        changed_files=("services/agent_core/runner.py",),
+                    ),
+                ),
+                (
+                    AgentVerification(
+                        verification_level="syntax_only",
+                        command_argv=("python", "-m", "py_compile", "services/agent_core/runner.py"),
+                        changed_files=("services/agent_core/runner.py",),
+                    ),
+                    AgentVerification(
+                        kind="targeted_pytest",
+                        verification_level="targeted_tests_passed",
+                        command_argv=("python", "-m", "pytest", "tests/unit/test_agent_core_runner.py"),
+                        changed_files=("services/agent_core/runner.py",),
+                    ),
+                ),
+            ],
+            review=PatchReview(
+                accepted=True,
+                reason="Patch passed review",
+                changed_files=("services/agent_core/runner.py",),
+                patch_diff=patch_diff,
+            ),
+        )
+        runtime = _RecordingFakeRuntime(
+            command_results=[
+                CommandResult(run_id=run_id, task_id="task_syntax_1", exit_code=0),
+                CommandResult(run_id=run_id, task_id="task_test_1", exit_code=1, stderr="AssertionError: expected True"),
+                CommandResult(run_id=run_id, task_id="task_syntax_2", exit_code=0),
+                CommandResult(run_id=run_id, task_id="task_test_2", exit_code=0, stdout="1 passed"),
+            ],
+        )
+        session_store = _RecordingSessionStore()
+        coordinator = AgentCoreCoordinator(
+            agent_core=agent_core,
+            execution_runtime=runtime,
+            session_store=session_store,
+            repo_intelligence=repo_intelligence,
+            repo_store=_InMemoryRepoStore({str(workspace.workspace_id): workspace}),
+        )
+        session = LocalAgentCoreService().create_session(
+            run_id=run_id,
+            workspace_id=workspace.workspace_id,
+            user_request="Patch runner.py and keep focused tests passing",
+            repo_context=RepoContextResult(
+                workspace_id=workspace.workspace_id,
+                run_id=run_id,
+                repo_map="stale repo map",
+                file_summaries=(FileSummary(path="services/agent_core/runner.py", summary="before patch", content="old\n"),),
+            ),
+            current_plan=AgentPlan(
+                goal="Patch and verify",
+                steps=[
+                    AgentStep(step_id="step_1", kind="patch", description="Patch runner.py", target_files=("services/agent_core/runner.py",)),
+                    AgentStep(step_id="step_2", kind="patch", description="Repair runner.py", target_files=("services/agent_core/runner.py",)),
+                    AgentStep(step_id="step_3", kind="complete", description="Finish"),
+                ],
+            ),
+        )
+
+        outcome = await coordinator.run(session)
+
+        self.assertEqual(outcome.status, "completed")
+        self.assertEqual(
+            runtime.calls,
+            ["apply_patch", "execute_command", "execute_command", "apply_patch", "execute_command", "execute_command", "finalize_run"],
+        )
+        self.assertEqual(
+            [request.argv for request in runtime.command_requests],
+            [
+                ("python", "-m", "py_compile", "services/agent_core/runner.py"),
+                ("python", "-m", "pytest", "tests/unit/test_agent_core_runner.py"),
+                ("python", "-m", "py_compile", "services/agent_core/runner.py"),
+                ("python", "-m", "pytest", "tests/unit/test_agent_core_runner.py"),
+            ],
+        )
+        failed_verification = next(
+            item for item in outcome.session.verification_history if item.exit_code == 1
+        )
+        self.assertEqual(failed_verification.verification_level, "targeted_tests_failed")
+        self.assertFalse(any(failure.stage == "command" for failure in outcome.session.failure_history))
+
     async def test_coordinator_does_not_apply_patch_when_review_fails(self):
         # Verifies that a rejected patch review stops execution before runtime patch application.
         # This catches coordinators that dispatch unsafe patches even after deterministic review rejects them.
@@ -908,6 +1689,47 @@ class TestAgentCoreCoordinator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runtime.calls, [])
         self.assertEqual(outcome.session.failure_history[-1].stage, "review_patch")
         self.assertIn("unsafe patch", outcome.session.failure_history[-1].message)
+
+    async def test_coordinator_regenerates_patch_after_read_only_review_failure(self):
+        patch_intent = AgentAction(
+            type=AgentActionType.PROPOSE_PATCH,
+            reason="Patch app.py",
+            step_id="step_1",
+            action_id="action_1_propose_patch_step_1",
+            target_files=("app.py",),
+        )
+        valid_patch = replace(
+            patch_intent,
+            patch_diff="--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-old\n+new\n",
+        )
+        agent_core = _SequencedFakeAgentCore(
+            actions=[
+                patch_intent,
+                AgentAction(type=AgentActionType.COMPLETE, reason="done", summary_text="done"),
+            ],
+            generated_patch=[valid_patch, valid_patch],
+            review=[
+                AgentPatchReviewError(
+                    "read_only_reference_modified",
+                    "Patch modifies read-only reference files: ['docs/spec.md']",
+                ),
+                PatchReview(
+                    accepted=True,
+                    reason="Patch passed review",
+                    changed_files=("app.py",),
+                    patch_diff=valid_patch.patch_diff,
+                ),
+            ],
+        )
+        runtime = _RecordingFakeRuntime()
+        coordinator = AgentCoreCoordinator(agent_core=agent_core, execution_runtime=runtime)
+
+        outcome = await coordinator.run(self._make_session())
+
+        self.assertEqual(outcome.status, "completed", outcome.session.failure_history)
+        self.assertEqual(runtime.calls.count("apply_patch"), 1)
+        self.assertEqual(outcome.session.failure_history[0].code, "read_only_reference_modified")
+        self.assertTrue(outcome.session.failure_history[0].retryable)
 
     async def test_coordinator_fails_loudly_when_patch_generation_is_invalid(self):
         # Verifies that patch-generation failures stop execution before review/apply and surface a dedicated failure stage.

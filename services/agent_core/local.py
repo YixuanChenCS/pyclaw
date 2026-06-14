@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
+from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Iterable
 from typing import Sequence
 
@@ -24,6 +26,7 @@ from .models import (
     AgentSession,
     AgentSessionPhase,
     AgentStep,
+    AgentVerification,
     PatchReview,
     RunSummary,
 )
@@ -41,6 +44,7 @@ from .validation import (
     evaluate_loop_guard,
     extract_patch_changed_files,
     parse_json_object,
+    reference_paths_from_session,
     validate_command_payload,
     validate_patch_intent_payload,
     validate_patch_diff_against_session,
@@ -49,6 +53,32 @@ from .validation import (
     validate_plan_payload,
     validate_session_basic_shape,
 )
+
+_VERIFICATION_IGNORED_SEGMENTS = frozenset(
+    {
+        ".git",
+        ".venv",
+        "venv",
+        "__pycache__",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".tox",
+        ".cache",
+        "node_modules",
+        "vendor",
+        "dist",
+        "build",
+    }
+)
+_VERIFICATION_IGNORED_SUFFIXES = (
+    ".generated.py",
+    "_generated.py",
+    "_pb2.py",
+    "_pb2_grpc.py",
+)
+DEFAULT_TARGETED_TEST_ROOTS = ("tests/unit",)
+DEFAULT_TARGETED_TEST_COMMAND_PREFIX = ("python", "-m", "pytest")
+MAX_VERIFICATION_ATTEMPTS_PER_SIGNATURE = 3
 
 
 class LocalAgentCoreService(AgentCoreService):
@@ -59,9 +89,15 @@ class LocalAgentCoreService(AgentCoreService):
         *,
         model_client: ModelClient | None = None,
         session_store: AgentSessionStore | None = None,
+        targeted_test_roots: Sequence[str] = DEFAULT_TARGETED_TEST_ROOTS,
+        targeted_test_command_prefix: Sequence[str] = DEFAULT_TARGETED_TEST_COMMAND_PREFIX,
+        fallback_test_command: Sequence[str] = (),
     ) -> None:
         self._model_client = model_client
         self._session_store = session_store
+        self._targeted_test_roots = tuple(targeted_test_roots)
+        self._targeted_test_command_prefix = tuple(targeted_test_command_prefix)
+        self._fallback_test_command = tuple(fallback_test_command)
 
     @property
     def model_client(self) -> ModelClient | None:
@@ -83,6 +119,7 @@ class LocalAgentCoreService(AgentCoreService):
         completed_action_ids: Sequence[str] = (),
         iteration_count: int = 0,
         failure_history: Sequence[AgentFailure] = (),
+        verification_history: Sequence[AgentVerification] = (),
         warnings: Sequence[str] = (),
         context_budget: AgentContextBudget | None = None,
     ) -> AgentSession:
@@ -100,6 +137,7 @@ class LocalAgentCoreService(AgentCoreService):
             completed_action_ids=list(completed_action_ids),
             iteration_count=iteration_count,
             failure_history=list(failure_history),
+            verification_history=list(verification_history),
             warnings=list(warnings),
             context_budget=context_budget,
         )
@@ -400,6 +438,73 @@ class LocalAgentCoreService(AgentCoreService):
 
         return contents
 
+    def plan_patch_verification(
+        self,
+        session: AgentSession,
+        *,
+        changed_files: tuple[str, ...],
+        deleted_files: tuple[str, ...] = (),
+        workspace_root: str | None = None,
+    ) -> tuple[AgentVerification, ...]:
+        repo_context = session.repo_context
+
+        deleted = set(deleted_files)
+        eligible_python_files = tuple(
+            self._ordered_unique(
+                path
+                for path in changed_files
+                if path not in deleted and self._is_verifiable_python_path(path)
+            )
+        )
+        if not eligible_python_files:
+            return ()
+
+        verification_steps = [
+            AgentVerification(
+                kind="py_compile",
+                verification_level="syntax_only",
+                command_argv=("python", "-m", "py_compile", *eligible_python_files),
+                changed_files=eligible_python_files,
+            )
+        ]
+
+        existing_paths = self._known_workspace_paths(repo_context, workspace_root=workspace_root)
+        matched_test_files = self._matching_targeted_test_files(
+            eligible_python_files,
+            existing_paths=existing_paths,
+        )
+        if matched_test_files:
+            verification_steps.extend(
+                AgentVerification(
+                    kind="targeted_pytest",
+                    verification_level="targeted_tests_passed",
+                    command_argv=(*self._targeted_test_command_prefix, test_file),
+                    changed_files=eligible_python_files,
+                )
+                for test_file in matched_test_files
+            )
+            return tuple(verification_steps)
+
+        if self._fallback_test_command:
+            verification_steps.append(
+                AgentVerification(
+                    kind="fallback_pytest",
+                    verification_level="fallback_tests_passed",
+                    command_argv=self._fallback_test_command,
+                    changed_files=eligible_python_files,
+                )
+            )
+            return tuple(verification_steps)
+
+        verification_steps.append(
+            AgentVerification(
+                kind="functional_verification_missing",
+                verification_level="functional_verification_missing",
+                changed_files=eligible_python_files,
+            )
+        )
+        return tuple(verification_steps)
+
     async def summarize_run(self, session: AgentSession) -> RunSummary:
         validate_session_basic_shape(session)
 
@@ -464,6 +569,41 @@ class LocalAgentCoreService(AgentCoreService):
         if latest_action is None:
             return None
 
+        latest_verification = self._latest_verification(session)
+        if (
+            latest_action.type == AgentActionType.PROPOSE_PATCH
+            and latest_verification is not None
+            and latest_verification.trigger_action_id == latest_action.action_id
+            and latest_verification.exit_code not in (None, 0)
+        ):
+            signature = latest_verification.failure_signature
+            if (
+                signature is not None
+                and self._verification_attempt_count(session, signature) >= MAX_VERIFICATION_ATTEMPTS_PER_SIGNATURE
+            ):
+                return ensure_action_id(
+                    session,
+                    AgentAction(
+                        type=AgentActionType.REQUEST_APPROVAL,
+                        reason="Automatic verification failed repeatedly with the same signature",
+                        approval_message=latest_failure.message,
+                        approval_risk_reason="Automatic verification retried the same failure signature too many times",
+                    ),
+                )
+
+            target_files = self._repair_target_files_for_verification(session, latest_verification)
+            if not target_files:
+                return None
+            return ensure_action_id(
+                session,
+                AgentAction(
+                    type=AgentActionType.PROPOSE_PATCH,
+                    reason="Fix the issues found by automatic post-patch verification",
+                    target_files=target_files,
+                    summary_text=latest_failure.message,
+                ),
+            )
+
         if latest_action.type == AgentActionType.RUN_COMMAND:
             target_files = self._repair_target_files(session, latest_action)
             if not target_files:
@@ -499,6 +639,8 @@ class LocalAgentCoreService(AgentCoreService):
 
     def _checks_passed(self, session: AgentSession) -> bool | None:
         commands_run = any(action.type == AgentActionType.RUN_COMMAND for action in session.action_history)
+        if not commands_run and session.verification_history:
+            commands_run = True
         if not commands_run:
             return None
         return not any(failure.stage == "command" for failure in session.failure_history)
@@ -522,11 +664,118 @@ class LocalAgentCoreService(AgentCoreService):
 
         return ()
 
+    def _repair_target_files_for_verification(
+        self,
+        session: AgentSession,
+        verification: AgentVerification,
+    ) -> tuple[str, ...]:
+        repo_context = session.repo_context
+        if repo_context is not None and repo_context.file_summaries:
+            paths = tuple(item.path for item in repo_context.file_summaries if item.path)
+            if paths:
+                return paths
+        return verification.changed_files
+
     def _latest_command_action(self, session: AgentSession) -> AgentAction | None:
         for action in reversed(session.action_history):
             if action.type == AgentActionType.RUN_COMMAND:
                 return action
         return None
+
+    def _latest_verification(self, session: AgentSession) -> AgentVerification | None:
+        if not session.verification_history:
+            return None
+        return session.verification_history[-1]
+
+    def _verification_attempt_count(
+        self,
+        session: AgentSession,
+        failure_signature: str,
+    ) -> int:
+        return sum(
+            1
+            for item in session.verification_history
+            if item.failure_signature == failure_signature and item.exit_code not in (None, 0)
+        )
+
+    def _is_verifiable_python_path(self, path: str) -> bool:
+        normalized = PurePosixPath(path)
+        if normalized.suffix != ".py":
+            return False
+        if any(part in _VERIFICATION_IGNORED_SEGMENTS for part in normalized.parts):
+            return False
+        name = normalized.name
+        if name.endswith(_VERIFICATION_IGNORED_SUFFIXES):
+            return False
+        return True
+
+    def _known_workspace_paths(
+        self,
+        repo_context: RepoContextResult | None,
+        *,
+        workspace_root: str | None,
+    ) -> set[str]:
+        known_paths = {
+            item.path
+            for item in repo_context.file_summaries
+        } if repo_context is not None else set()
+        if workspace_root is None:
+            return known_paths
+
+        root = Path(workspace_root)
+        for test_root in self._targeted_test_roots:
+            test_root_path = root / test_root
+            if not test_root_path.exists():
+                continue
+            for file_path in test_root_path.rglob("test_*.py"):
+                try:
+                    relative = file_path.relative_to(root)
+                except ValueError:
+                    continue
+                known_paths.add(relative.as_posix())
+        return known_paths
+
+    def _matching_targeted_test_files(
+        self,
+        changed_files: tuple[str, ...],
+        *,
+        existing_paths: set[str],
+    ) -> tuple[str, ...]:
+        matched: list[str] = []
+        seen: set[str] = set()
+        for changed_file in changed_files:
+            for candidate in self._targeted_test_candidates(changed_file):
+                if candidate not in existing_paths or candidate in seen:
+                    continue
+                seen.add(candidate)
+                matched.append(candidate)
+        return tuple(matched)
+
+    def _targeted_test_candidates(self, path: str) -> tuple[str, ...]:
+        normalized = PurePosixPath(path)
+        if normalized.name.startswith("test_") and normalized.suffix == ".py":
+            return (normalized.as_posix(),)
+
+        logical_parts = normalized.with_suffix("").parts
+        if logical_parts and logical_parts[0] in {"services", "packages", "apps"}:
+            logical_parts = logical_parts[1:]
+        if not logical_parts:
+            return ()
+
+        stem_candidates = [
+            "_".join(logical_parts),
+            "_".join(logical_parts[-2:]) if len(logical_parts) >= 2 else "",
+            logical_parts[-1],
+        ]
+        candidates: list[str] = []
+        for test_root in self._targeted_test_roots:
+            for stem in stem_candidates:
+                if not stem:
+                    continue
+                candidate = f"{test_root}/test_{stem}.py"
+                if candidate not in candidates:
+                    candidates.append(candidate)
+        return tuple(candidates)
 
     def _final_status(self, session: AgentSession) -> str:
         plan = session.current_plan
@@ -567,7 +816,7 @@ class LocalAgentCoreService(AgentCoreService):
                 type=AgentActionType.PROPOSE_PATCH,
                 reason=step.description,
                 step_id=step.step_id,
-                target_files=step.target_files,
+                target_files=self._editable_target_files(session, step.target_files),
                 summary_text=step.rationale,
             ))
 
@@ -608,6 +857,18 @@ class LocalAgentCoreService(AgentCoreService):
             ))
 
         raise AgentStateValidationError(f"Unsupported plan step kind {kind!r}")
+
+    def _editable_target_files(
+        self,
+        session: AgentSession,
+        target_files: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        reference_paths = reference_paths_from_session(session)
+        return tuple(
+            path
+            for path in target_files
+            if PurePosixPath(path.replace("\\", "/")).as_posix() not in reference_paths
+        )
 
     def _normalize_plan_step_ids(self, plan: AgentPlan | None) -> AgentPlan | None:
         if plan is None:

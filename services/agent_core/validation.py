@@ -55,6 +55,14 @@ class AgentStateValidationError(AgentCoreValidationError):
     """Raised when session state is inconsistent for deterministic action selection."""
 
 
+class AgentPatchReviewError(AgentStateValidationError):
+    """Raised when a patch can be repaired after deterministic review."""
+
+    def __init__(self, failure_code: str, message: str) -> None:
+        super().__init__(message)
+        self.failure_code = failure_code
+
+
 def validate_action_type(action_type: AgentActionType | str) -> AgentActionType:
     if isinstance(action_type, AgentActionType):
         return action_type
@@ -598,6 +606,19 @@ def validate_patch_diff_against_session(
             raise AgentStateValidationError(str(exc)) from exc
 
     changed_files = extract_patch_changed_files(patch_diff)
+    protected_paths = reference_paths_from_session(session)
+    modified_reference_paths = sorted({
+        path
+        for file_patch in file_patches
+        for path in (file_patch.old_path, file_patch.new_path)
+        if path != "/dev/null" and _normalize_comparison_path(path) in protected_paths
+    })
+    if modified_reference_paths:
+        raise AgentPatchReviewError(
+            "read_only_reference_modified",
+            f"Patch modifies read-only reference files: {modified_reference_paths!r}",
+        )
+
     content_by_path = _repo_context_file_contents(session)
     for file_patch in file_patches:
         target_path = file_patch.new_path if file_patch.new_path != "/dev/null" else file_patch.old_path
@@ -613,6 +634,21 @@ def validate_patch_diff_against_session(
             raise AgentStateValidationError(str(exc)) from exc
 
     return tuple(path for path, _deleted in changed_files)
+
+
+def reference_paths_from_session(session: AgentSession) -> frozenset[str]:
+    repo_context = session.repo_context
+    if repo_context is None:
+        return frozenset()
+    return frozenset(
+        _normalize_comparison_path(item.path)
+        for item in repo_context.reference_file_summaries
+        if item.path
+    )
+
+
+def _normalize_comparison_path(path: str) -> str:
+    return PurePosixPath(path.replace("\\", "/")).as_posix()
 
 
 def _repo_context_file_contents(session: AgentSession) -> dict[str, str]:

@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 from packages.shared_types import FileSummary, RepoContextResult, TaskStatus, new_run_id, new_workspace_id
-from services.agent_core import AgentAction, AgentActionType, AgentContextBudget, AgentFailure, AgentPlan, AgentSessionPhase, AgentStep, LocalAgentCoreService
+from services.agent_core import AgentAction, AgentActionType, AgentContextBudget, AgentFailure, AgentPlan, AgentSessionPhase, AgentStep, AgentVerification, LocalAgentCoreService
 from services.execution_runtime import SQLiteExecutionRuntimeRepository
 
 
@@ -25,7 +25,16 @@ class TestAgentSessionStore(unittest.IsolatedAsyncioTestCase):
                     content="def local():\n    return 'ok'\n",
                 ),
             ),
+            reference_file_summaries=(
+                FileSummary(
+                    path="docs/reference.md",
+                    summary="small markdown file",
+                    language="markdown",
+                    content="# reference\n",
+                ),
+            ),
             repo_map="services/\n  agent_core/\n",
+            mentioned_paths=("services/agent_core/local.py",),
             dependency_hints=("services.agent_core.local",),
             warnings=("context warning",),
         )
@@ -86,6 +95,18 @@ class TestAgentSessionStore(unittest.IsolatedAsyncioTestCase):
                         },
                     )
                 ],
+                verification_history=[
+                    AgentVerification(
+                        verification_level="syntax_only",
+                        command_argv=("python", "-m", "py_compile", "services/agent_core/local.py"),
+                        changed_files=("services/agent_core/local.py",),
+                        stdout="",
+                        stderr="SyntaxError: invalid syntax",
+                        exit_code=1,
+                        failure_signature="py_compile:deadbeef",
+                        trigger_action_id="action_1_propose_patch_step_1",
+                    )
+                ],
                 warnings=("session warning",),
                 context_budget=AgentContextBudget(
                     max_input_tokens=8000,
@@ -118,6 +139,12 @@ class TestAgentSessionStore(unittest.IsolatedAsyncioTestCase):
                     "stderr": "NameError: helper_value is not defined",
                 },
             )
+            self.assertEqual(
+                loaded.verification_history[0].command_argv,
+                ("python", "-m", "py_compile", "services/agent_core/local.py"),
+            )
+            self.assertEqual(loaded.verification_history[0].verification_level, "syntax_only")
+            self.assertEqual(loaded.verification_history[0].failure_signature, "py_compile:deadbeef")
             self.assertEqual(loaded.warnings, agent_session.warnings)
             self.assertEqual(loaded.context_budget.to_dict(), agent_session.context_budget.to_dict())
 

@@ -9,6 +9,9 @@ from packages.shared_types import (
     CommandResult,
     ErrorCode,
     EventType,
+    FileSummary,
+    RepoContextRequest,
+    RepoContextResult,
     Run,
     RunResult,
     RunStatus,
@@ -154,6 +157,32 @@ class TestSharedTypesContracts(unittest.TestCase):
 
         round_tripped = json.loads(event.to_json())
         self.assertEqual(round_tripped["run_id"], str(run.run_id))
+
+    def test_repo_context_contracts_serialize_reference_and_mention_fields(self):
+        workspace = Workspace(root_path="/tmp/repo")
+        run_id = new_run_id()
+        request = RepoContextRequest(
+            workspace_id=workspace.workspace_id,
+            run_id=run_id,
+            prompt="Check main.py with docs/reference.md",
+            target_paths=("main.py",),
+            reference_paths=("docs/reference.md",),
+        )
+        result = RepoContextResult(
+            workspace_id=workspace.workspace_id,
+            run_id=run_id,
+            file_summaries=(FileSummary(path="main.py", content="print('ok')\n"),),
+            reference_file_summaries=(
+                FileSummary(path="docs/reference.md", content="# reference\n"),
+            ),
+            mentioned_paths=("main.py",),
+        )
+
+        self.assertEqual(request.to_dict()["reference_paths"], ["docs/reference.md"])
+        self.assertEqual(request.to_dict()["auto_context_mentions"], True)
+        payload = result.to_dict()
+        self.assertEqual(payload["reference_file_summaries"][0]["path"], "docs/reference.md")
+        self.assertEqual(payload["mentioned_paths"], ["main.py"])
 
     def test_placeholder_modules_still_import(self):
         modules = [

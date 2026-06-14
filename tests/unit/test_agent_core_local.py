@@ -7,10 +7,11 @@ from unittest.mock import patch
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 
 from packages.shared_types import FileSummary, RepoContextResult, TaskStatus, new_run_id, new_workspace_id
-from services.agent_core import AgentFailure, FakeModelClient, LocalAgentCoreService
+from services.agent_core import AgentFailure, AgentVerification, FakeModelClient, LocalAgentCoreService
 from services.agent_core.models import AgentAction, AgentActionType, AgentPlan, AgentStep
 from services.agent_core.models import AgentSession
 from services.execution_runtime.local import LocalExecutionRuntimeService
@@ -179,6 +180,37 @@ class TestLocalAgentCoreService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(action.requested_context, ("services/agent_core/local.py",))
         self.assertEqual(action.target_files, ("services/agent_core/local.py",))
 
+    async def test_next_patch_action_filters_read_only_reference_targets(self):
+        service = LocalAgentCoreService()
+        run_id = new_run_id()
+        workspace_id = new_workspace_id()
+        session = service.create_session(
+            run_id=run_id,
+            workspace_id=workspace_id,
+            user_request="Patch app.py using the spec",
+            repo_context=RepoContextResult(
+                workspace_id=workspace_id,
+                run_id=run_id,
+                file_summaries=(FileSummary(path="app.py", summary="editable"),),
+                reference_file_summaries=(FileSummary(path="docs/spec.md", summary="read-only"),),
+            ),
+            current_plan=AgentPlan(
+                goal="Patch app.py",
+                steps=[
+                    AgentStep(
+                        kind="patch",
+                        description="Patch app.py",
+                        target_files=("app.py", "docs/spec.md"),
+                    )
+                ],
+            ),
+        )
+
+        action = await service.next_action(session)
+
+        self.assertEqual(action.type, AgentActionType.PROPOSE_PATCH)
+        self.assertEqual(action.target_files, ("app.py",))
+
     async def test_generate_patch_is_headless_and_uses_fake_model_client_only(self):
         # Verifies that patch generation stays inside the model-client boundary and does not call runtime or mutate files.
         # This catches accidental shell, filesystem, or execution-runtime side effects while generating a diff proposal.
@@ -337,6 +369,169 @@ class TestLocalAgentCoreService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary.final_status, "completed")
         self.assertEqual(summary.changed_files, ("services/agent_core/local.py",))
 
+    def test_plan_patch_verification_skips_docs_only_patch(self):
+        service = LocalAgentCoreService()
+        run_id = new_run_id()
+        workspace_id = new_workspace_id()
+        session = service.create_session(
+            run_id=run_id,
+            workspace_id=workspace_id,
+            user_request="Patch docs only",
+            repo_context=self._make_repo_context(run_id, workspace_id),
+        )
+
+        verifications = service.plan_patch_verification(
+            session,
+            changed_files=("README.md", "docs/agent_core_design.md"),
+        )
+
+        self.assertEqual(verifications, ())
+
+    def test_plan_patch_verification_skips_docs_only_patch_even_with_fallback(self):
+        service = LocalAgentCoreService(
+            fallback_test_command=("python", "-m", "pytest", "tests/unit"),
+        )
+        run_id = new_run_id()
+        workspace_id = new_workspace_id()
+        session = service.create_session(
+            run_id=run_id,
+            workspace_id=workspace_id,
+            user_request="Patch docs only",
+            repo_context=self._make_repo_context(run_id, workspace_id),
+        )
+
+        verifications = service.plan_patch_verification(
+            session,
+            changed_files=("README.md", "docs/agent_core_design.md"),
+        )
+
+        self.assertEqual(verifications, ())
+
+    def test_plan_patch_verification_filters_deleted_and_ignored_python_paths(self):
+        service = LocalAgentCoreService()
+        run_id = new_run_id()
+        workspace_id = new_workspace_id()
+        session = service.create_session(
+            run_id=run_id,
+            workspace_id=workspace_id,
+            user_request="Patch Python files",
+            repo_context=self._make_repo_context(run_id, workspace_id),
+        )
+
+        verifications = service.plan_patch_verification(
+            session,
+            changed_files=(
+                "app.py",
+                "pkg/new_module.py",
+                "old_module.py",
+                ".venv/lib/site.py",
+                "__pycache__/ignored.py",
+                "generated/foo_pb2.py",
+            ),
+            deleted_files=("old_module.py",),
+        )
+
+        self.assertEqual(len(verifications), 2)
+        verification = verifications[0]
+        self.assertEqual(
+            verification.command_argv,
+            ("python", "-m", "py_compile", "app.py", "pkg/new_module.py"),
+        )
+        self.assertEqual(verification.changed_files, ("app.py", "pkg/new_module.py"))
+        self.assertEqual(verification.verification_level, "syntax_only")
+        self.assertEqual(verifications[1].verification_level, "functional_verification_missing")
+
+    def test_plan_patch_verification_adds_targeted_pytest_for_matching_test_file(self):
+        service = LocalAgentCoreService()
+        run_id = new_run_id()
+        workspace_id = new_workspace_id()
+        session = service.create_session(
+            run_id=run_id,
+            workspace_id=workspace_id,
+            user_request="Patch runner.py",
+            repo_context=self._make_repo_context(run_id, workspace_id),
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tests_dir = Path(tmpdir) / "tests" / "unit"
+            tests_dir.mkdir(parents=True)
+            (tests_dir / "test_agent_core_runner.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+
+            verifications = service.plan_patch_verification(
+                session,
+                changed_files=("services/agent_core/runner.py",),
+                workspace_root=tmpdir,
+            )
+
+        self.assertEqual(len(verifications), 2)
+        self.assertEqual(
+            verifications[0].command_argv,
+            ("python", "-m", "py_compile", "services/agent_core/runner.py"),
+        )
+        self.assertEqual(
+            verifications[1].command_argv,
+            ("python", "-m", "pytest", "tests/unit/test_agent_core_runner.py"),
+        )
+        self.assertEqual(verifications[1].verification_level, "targeted_tests_passed")
+
+    def test_plan_patch_verification_uses_fallback_when_no_targeted_test_exists(self):
+        service = LocalAgentCoreService(
+            fallback_test_command=("python", "-m", "pytest", "tests/unit"),
+        )
+        run_id = new_run_id()
+        workspace_id = new_workspace_id()
+        session = service.create_session(
+            run_id=run_id,
+            workspace_id=workspace_id,
+            user_request="Patch helper without focused tests",
+            repo_context=self._make_repo_context(run_id, workspace_id),
+        )
+
+        verifications = service.plan_patch_verification(
+            session,
+            changed_files=("docs/readme_helper.py",),
+        )
+
+        self.assertEqual(len(verifications), 2)
+        self.assertEqual(verifications[0].verification_level, "syntax_only")
+        self.assertEqual(verifications[1].kind, "fallback_pytest")
+        self.assertEqual(verifications[1].verification_level, "fallback_tests_passed")
+        self.assertEqual(
+            verifications[1].command_argv,
+            ("python", "-m", "pytest", "tests/unit"),
+        )
+
+    def test_plan_patch_verification_prefers_targeted_tests_over_fallback(self):
+        service = LocalAgentCoreService(
+            fallback_test_command=("python", "-m", "pytest", "tests/unit"),
+        )
+        run_id = new_run_id()
+        workspace_id = new_workspace_id()
+        session = service.create_session(
+            run_id=run_id,
+            workspace_id=workspace_id,
+            user_request="Patch runner.py",
+            repo_context=self._make_repo_context(run_id, workspace_id),
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tests_dir = Path(tmpdir) / "tests" / "unit"
+            tests_dir.mkdir(parents=True)
+            (tests_dir / "test_agent_core_runner.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+
+            verifications = service.plan_patch_verification(
+                session,
+                changed_files=("services/agent_core/runner.py",),
+                workspace_root=tmpdir,
+            )
+
+        self.assertEqual(len(verifications), 2)
+        self.assertEqual(verifications[1].kind, "targeted_pytest")
+        self.assertEqual(
+            verifications[1].command_argv,
+            ("python", "-m", "pytest", "tests/unit/test_agent_core_runner.py"),
+        )
+
     async def test_next_action_proposes_patch_after_retryable_command_failure(self):
         # Verifies that retryable command failures are converted into a repair patch step instead of immediate approval escalation.
         # This catches a broken recovery loop where verification failures are recorded but agent_core does not use the new context to attempt a fix.
@@ -454,6 +649,210 @@ class TestLocalAgentCoreService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(action.command_argv, ("python", "-m", "pytest", "tests/test_app.py"))
         self.assertEqual(action.cwd, ".")
         self.assertEqual(action.target_files, ("tests/test_app.py",))
+
+    async def test_next_action_proposes_patch_after_failed_automatic_verification(self):
+        # Verifies that an automatic post-patch verification failure triggers another repair patch instead of rerunning an unrelated command.
+        # This catches a bad branch where verification failures after a patch would incorrectly fall through to the generic rerun-command path.
+        # The repair patch target is correct because the refreshed repo context around the failed verification should drive the next fix attempt.
+        service = LocalAgentCoreService()
+        run_id = new_run_id()
+        workspace_id = new_workspace_id()
+        patch_action = AgentAction(
+            type=AgentActionType.PROPOSE_PATCH,
+            reason="Patch app.py",
+            step_id="step_1",
+            action_id="action_1_propose_patch_step_1",
+            target_files=("app.py",),
+            patch_diff="--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-old\n+new\n",
+        )
+        session = service.create_session(
+            run_id=run_id,
+            workspace_id=workspace_id,
+            user_request="Patch app.py and keep it valid",
+            repo_context=RepoContextResult(
+                workspace_id=workspace_id,
+                run_id=run_id,
+                file_summaries=(FileSummary(path="app.py", summary="python file"),),
+            ),
+            current_plan=AgentPlan(
+                goal="Patch and verify",
+                steps=[
+                    AgentStep(step_id="step_1", kind="patch", description="Patch app.py", target_files=("app.py",)),
+                ],
+            ),
+            action_history=[patch_action],
+            failure_history=[
+                AgentFailure(
+                    stage="command",
+                    message="Command failed with exit code 1",
+                    code="command_failed",
+                    retryable=True,
+                )
+            ],
+            verification_history=[
+                AgentVerification(
+                    command_argv=("python", "-m", "py_compile", "app.py"),
+                    changed_files=("app.py",),
+                    stderr="SyntaxError: invalid syntax",
+                    exit_code=1,
+                    failure_signature="py_compile:abc123",
+                    trigger_action_id=patch_action.action_id,
+                )
+            ],
+        )
+
+        with self._headless_side_effect_guards():
+            action = await service.next_action(session)
+
+        self.assertEqual(action.type, AgentActionType.PROPOSE_PATCH)
+        self.assertEqual(action.target_files, ("app.py",))
+        self.assertIn("automatic post-patch verification", action.reason)
+
+    async def test_next_action_requests_approval_after_repeated_verification_signature(self):
+        # Verifies that the agent stops retrying after the same automatic verification failure repeats too many times.
+        # This catches infinite self-repair loops when repo_intelligence adds no useful new context and py_compile keeps failing the same way.
+        # Approval escalation is correct because the deterministic repair strategy has exhausted its configured attempts for one signature.
+        service = LocalAgentCoreService()
+        run_id = new_run_id()
+        workspace_id = new_workspace_id()
+        patch_action = AgentAction(
+            type=AgentActionType.PROPOSE_PATCH,
+            reason="Patch app.py",
+            step_id="step_1",
+            action_id="action_1_propose_patch_step_1",
+            target_files=("app.py",),
+            patch_diff="--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-old\n+new\n",
+        )
+        repeated_signature = "py_compile:repeat123"
+        session = service.create_session(
+            run_id=run_id,
+            workspace_id=workspace_id,
+            user_request="Patch app.py and keep it valid",
+            repo_context=self._make_repo_context(run_id, workspace_id),
+            current_plan=AgentPlan(
+                goal="Patch and verify",
+                steps=[
+                    AgentStep(step_id="step_1", kind="patch", description="Patch app.py", target_files=("app.py",)),
+                ],
+            ),
+            action_history=[patch_action],
+            failure_history=[
+                AgentFailure(
+                    stage="command",
+                    message="Command failed with exit code 1",
+                    code="command_failed",
+                    retryable=True,
+                )
+            ],
+            verification_history=[
+                AgentVerification(
+                    command_argv=("python", "-m", "py_compile", "app.py"),
+                    changed_files=("app.py",),
+                    stderr="SyntaxError: invalid syntax",
+                    exit_code=1,
+                    failure_signature=repeated_signature,
+                    trigger_action_id=patch_action.action_id,
+                ),
+                AgentVerification(
+                    command_argv=("python", "-m", "py_compile", "app.py"),
+                    changed_files=("app.py",),
+                    stderr="SyntaxError: invalid syntax",
+                    exit_code=1,
+                    failure_signature=repeated_signature,
+                    trigger_action_id=patch_action.action_id,
+                ),
+                AgentVerification(
+                    command_argv=("python", "-m", "py_compile", "app.py"),
+                    changed_files=("app.py",),
+                    stderr="SyntaxError: invalid syntax",
+                    exit_code=1,
+                    failure_signature=repeated_signature,
+                    trigger_action_id=patch_action.action_id,
+                ),
+            ],
+        )
+
+        with self._headless_side_effect_guards():
+            action = await service.next_action(session)
+
+        self.assertEqual(action.type, AgentActionType.REQUEST_APPROVAL)
+        self.assertIn("failed repeatedly", action.reason)
+
+    async def test_next_action_requests_approval_after_repeated_fallback_verification_signature(self):
+        # Verifies that fallback pytest failures share the same max-attempt guard as syntax verification failures.
+        # This catches a loop where configured fallback tests keep failing with the same signature but never escalate.
+        # Approval escalation is correct because fallback verification is part of the same deterministic automatic repair loop.
+        service = LocalAgentCoreService()
+        run_id = new_run_id()
+        workspace_id = new_workspace_id()
+        patch_action = AgentAction(
+            type=AgentActionType.PROPOSE_PATCH,
+            reason="Patch helper.py",
+            step_id="step_1",
+            action_id="action_1_propose_patch_step_1",
+            target_files=("helper.py",),
+            patch_diff="--- a/helper.py\n+++ b/helper.py\n@@ -1 +1 @@\n-old\n+new\n",
+        )
+        repeated_signature = "pytest:repeat123"
+        session = service.create_session(
+            run_id=run_id,
+            workspace_id=workspace_id,
+            user_request="Patch helper.py and keep fallback tests passing",
+            repo_context=self._make_repo_context(run_id, workspace_id),
+            current_plan=AgentPlan(
+                goal="Patch and verify",
+                steps=[
+                    AgentStep(step_id="step_1", kind="patch", description="Patch helper.py", target_files=("helper.py",)),
+                ],
+            ),
+            action_history=[patch_action],
+            failure_history=[
+                AgentFailure(
+                    stage="command",
+                    message="Command failed with exit code 1",
+                    code="command_failed",
+                    retryable=True,
+                )
+            ],
+            verification_history=[
+                AgentVerification(
+                    kind="fallback_pytest",
+                    verification_level="fallback_tests_failed",
+                    command_argv=("python", "-m", "pytest", "tests/unit"),
+                    changed_files=("helper.py",),
+                    stderr="AssertionError: helper regression",
+                    exit_code=1,
+                    failure_signature=repeated_signature,
+                    trigger_action_id=patch_action.action_id,
+                ),
+                AgentVerification(
+                    kind="fallback_pytest",
+                    verification_level="fallback_tests_failed",
+                    command_argv=("python", "-m", "pytest", "tests/unit"),
+                    changed_files=("helper.py",),
+                    stderr="AssertionError: helper regression",
+                    exit_code=1,
+                    failure_signature=repeated_signature,
+                    trigger_action_id=patch_action.action_id,
+                ),
+                AgentVerification(
+                    kind="fallback_pytest",
+                    verification_level="fallback_tests_failed",
+                    command_argv=("python", "-m", "pytest", "tests/unit"),
+                    changed_files=("helper.py",),
+                    stderr="AssertionError: helper regression",
+                    exit_code=1,
+                    failure_signature=repeated_signature,
+                    trigger_action_id=patch_action.action_id,
+                ),
+            ],
+        )
+
+        with self._headless_side_effect_guards():
+            action = await service.next_action(session)
+
+        self.assertEqual(action.type, AgentActionType.REQUEST_APPROVAL)
+        self.assertIn("failed repeatedly", action.reason)
 
     def test_agent_core_import_does_not_load_pyclaw_modules(self):
         # Verifies the import boundary behaviorally by checking what modules load during agent_core import.

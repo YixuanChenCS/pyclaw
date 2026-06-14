@@ -67,6 +67,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
     parser.add_argument("--openrouter-api-key")
     parser.add_argument("--runtime-db-path")
     parser.add_argument("--stream-poll-interval", type=float)
+    parser.add_argument("--fallback-test-command")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -80,6 +81,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--workspace", required=True)
     run_parser.add_argument("--prompt", required=True)
     run_parser.add_argument("--target-path", action="append", default=[])
+    run_parser.add_argument("--read-only", action="append", default=[])
     run_parser.add_argument("--max-files", type=int, default=None)
     run_parser.add_argument("--lease-seconds", type=int, default=30)
     run_parser.add_argument("--worker-id", default="cli-worker")
@@ -88,6 +90,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
     patch_parser.add_argument("--workspace", required=True)
     patch_parser.add_argument("--prompt", required=True)
     patch_parser.add_argument("--target-path", action="append", required=True)
+    patch_parser.add_argument("--read-only", action="append", default=[])
     patch_parser.add_argument("--max-files", type=int, default=None)
     patch_parser.add_argument("--lease-seconds", type=int, default=30)
     patch_parser.add_argument("--worker-id", default="cli-worker")
@@ -115,6 +118,7 @@ def resolve_local_cli_runner_config(
             "openrouter_api_key": args.openrouter_api_key,
             "runtime_db_path": args.runtime_db_path,
             "stream_poll_interval": args.stream_poll_interval,
+            "fallback_test_command": args.fallback_test_command,
         },
     )
 
@@ -153,6 +157,7 @@ class _LocalCLIApplication(CLIApplication):
                 workspace_path=args.workspace,
                 prompt=args.prompt,
                 target_paths=tuple(args.target_path),
+                reference_paths=tuple(args.read_only),
                 max_files=args.max_files,
                 lease_seconds=args.lease_seconds,
                 worker_id=args.worker_id,
@@ -163,6 +168,7 @@ class _LocalCLIApplication(CLIApplication):
                 workspace_path=args.workspace,
                 prompt=args.prompt,
                 target_paths=tuple(args.target_path),
+                reference_paths=tuple(args.read_only),
                 max_files=args.max_files,
                 lease_seconds=args.lease_seconds,
                 worker_id=args.worker_id,
@@ -222,6 +228,7 @@ class _LocalCLIApplication(CLIApplication):
         workspace_path: str,
         prompt: str,
         target_paths: tuple[str, ...],
+        reference_paths: tuple[str, ...],
         max_files: int | None,
         lease_seconds: int,
         worker_id: str,
@@ -247,6 +254,7 @@ class _LocalCLIApplication(CLIApplication):
                 run_id=run_id,
                 prompt=prompt,
                 target_paths=target_paths,
+                reference_paths=reference_paths,
                 max_files=max_files,
             )
         )
@@ -269,6 +277,7 @@ class _LocalCLIApplication(CLIApplication):
                     run_id=run_id,
                     prompt=prompt,
                     target_paths=tuple(requested_context),
+                    reference_paths=reference_paths,
                     max_files=max_files,
                 )
             )
@@ -289,6 +298,7 @@ class _LocalCLIApplication(CLIApplication):
         workspace_path: str,
         prompt: str,
         target_paths: tuple[str, ...],
+        reference_paths: tuple[str, ...],
         max_files: int | None,
         lease_seconds: int,
         worker_id: str,
@@ -314,6 +324,7 @@ class _LocalCLIApplication(CLIApplication):
                 run_id=run_id,
                 prompt=prompt,
                 target_paths=target_paths,
+                reference_paths=reference_paths,
                 max_files=max_files,
             )
         )

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+import shlex
 from typing import Any, Mapping, Sequence
 
 import yaml
@@ -40,6 +41,7 @@ class LocalAgentRunnerConfig:
     api_keys: Mapping[str, str] = field(default_factory=dict)
     runtime_db_path: str = ".execution_runtime/runtime.sqlite3"
     stream_poll_interval: float = 0.05
+    fallback_test_command: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -79,6 +81,7 @@ def load_local_agent_runner_config_from_env(
                 "EXECUTION_RUNTIME_STREAM_POLL_INTERVAL",
                 0.05,
             ),
+            "fallback_test_command": source.get("AGENT_CORE_FALLBACK_TEST_COMMAND"),
         }
     )
 
@@ -106,6 +109,11 @@ def load_local_agent_runner_config_from_file(path: str | Path) -> LocalAgentRunn
         model_payload = {}
     if not isinstance(model_payload, Mapping):
         raise ValueError(f"agent_core.model must be a mapping in {config_path}")
+    verification_payload = scoped.get("verification", {})
+    if verification_payload is None:
+        verification_payload = {}
+    if not isinstance(verification_payload, Mapping):
+        raise ValueError(f"agent_core.verification must be a mapping in {config_path}")
 
     return _config_from_payload(
         {
@@ -125,6 +133,10 @@ def load_local_agent_runner_config_from_file(path: str | Path) -> LocalAgentRunn
             "stream_poll_interval": runtime_payload.get(
                 "stream_poll_interval",
                 scoped.get("stream_poll_interval"),
+            ),
+            "fallback_test_command": verification_payload.get(
+                "fallback_test_command",
+                scoped.get("fallback_test_command"),
             ),
         }
     )
@@ -202,6 +214,7 @@ def build_local_agent_runner_stack(
     agent_core = LocalAgentCoreService(
         model_client=model_client,
         session_store=repository,
+        fallback_test_command=config.fallback_test_command,
     )
     execution_runtime = LocalExecutionRuntimeService(
         repository=repository,
@@ -266,6 +279,8 @@ def _config_from_payload(payload: Mapping[str, Any]) -> LocalAgentRunnerConfig:
         except ValueError as exc:
             raise ValueError("EXECUTION_RUNTIME_STREAM_POLL_INTERVAL must be a float") from exc
 
+    fallback_test_command = _normalize_command_argv(payload.get("fallback_test_command"))
+
     return LocalAgentRunnerConfig(
         model=AgentCoreModelConfig(
             provider=str(model_payload.get("provider", "litellm")),
@@ -277,6 +292,7 @@ def _config_from_payload(payload: Mapping[str, Any]) -> LocalAgentRunnerConfig:
         api_keys=_normalize_api_keys(api_keys_payload),
         runtime_db_path=str(runtime_db_path),
         stream_poll_interval=poll_interval,
+        fallback_test_command=fallback_test_command,
     )
 
 
@@ -356,6 +372,8 @@ def _payload_from_env(env: Mapping[str, str] | None) -> dict[str, Any]:
         payload["runtime_db_path"] = source["EXECUTION_RUNTIME_DB_PATH"]
     if source.get("EXECUTION_RUNTIME_STREAM_POLL_INTERVAL") is not None:
         payload["stream_poll_interval"] = source["EXECUTION_RUNTIME_STREAM_POLL_INTERVAL"]
+    if source.get("AGENT_CORE_FALLBACK_TEST_COMMAND") is not None:
+        payload["fallback_test_command"] = source["AGENT_CORE_FALLBACK_TEST_COMMAND"]
 
     return payload
 
@@ -383,6 +401,11 @@ def _payload_from_file(path: str | Path) -> dict[str, Any]:
         model_payload = {}
     if not isinstance(model_payload, Mapping):
         raise ValueError(f"agent_core.model must be a mapping in {config_path}")
+    verification_payload = scoped.get("verification", {})
+    if verification_payload is None:
+        verification_payload = {}
+    if not isinstance(verification_payload, Mapping):
+        raise ValueError(f"agent_core.verification must be a mapping in {config_path}")
 
     result: dict[str, Any] = {}
     normalized_model = {
@@ -410,6 +433,12 @@ def _payload_from_file(path: str | Path) -> dict[str, Any]:
     )
     if stream_poll_interval is not None:
         result["stream_poll_interval"] = stream_poll_interval
+    fallback_test_command = verification_payload.get(
+        "fallback_test_command",
+        scoped.get("fallback_test_command"),
+    )
+    if fallback_test_command is not None:
+        result["fallback_test_command"] = fallback_test_command
 
     return result
 
@@ -441,6 +470,8 @@ def _payload_from_cli_overrides(cli_overrides: Mapping[str, Any]) -> dict[str, A
         result["runtime_db_path"] = cli_overrides["runtime_db_path"]
     if cli_overrides.get("stream_poll_interval") is not None:
         result["stream_poll_interval"] = cli_overrides["stream_poll_interval"]
+    if cli_overrides.get("fallback_test_command") is not None:
+        result["fallback_test_command"] = cli_overrides["fallback_test_command"]
 
     return result
 
@@ -453,3 +484,17 @@ def _merge_config_payloads(base: Mapping[str, Any], override: Mapping[str, Any])
         else:
             merged[key] = value
     return merged
+
+
+def _normalize_command_argv(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return ()
+        return tuple(shlex.split(stripped))
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        normalized = tuple(str(item).strip() for item in value if str(item).strip())
+        return normalized
+    raise ValueError("fallback_test_command must be a shell-like string or argv sequence")

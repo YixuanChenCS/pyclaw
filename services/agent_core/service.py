@@ -14,6 +14,7 @@ from .models import (
     AgentPlan,
     AgentSession,
     AgentSessionPhase,
+    AgentVerification,
     PatchReview,
     RunSummary,
 )
@@ -36,6 +37,7 @@ class AgentCoreService(ABC):
         action_history: Sequence[AgentAction] = (),
         iteration_count: int = 0,
         failure_history: Sequence[AgentFailure] = (),
+        verification_history: Sequence[AgentVerification] = (),
         warnings: Sequence[str] = (),
         context_budget: AgentContextBudget | None = None,
     ) -> AgentSession:
@@ -77,6 +79,17 @@ class AgentCoreService(ABC):
         proposed_action: AgentAction,
     ) -> PatchReview:
         """Review or refine a proposed patch action."""
+
+    @abstractmethod
+    def plan_patch_verification(
+        self,
+        session: AgentSession,
+        *,
+        changed_files: tuple[str, ...],
+        deleted_files: tuple[str, ...] = (),
+        workspace_root: str | None = None,
+    ) -> tuple[AgentVerification, ...]:
+        """Return deterministic verification steps for an applied patch, if needed."""
 
     @abstractmethod
     async def summarize_run(self, session: AgentSession) -> RunSummary:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 from pathlib import Path
 import re
 
@@ -22,7 +23,7 @@ from packages.shared_types import (
 from services.execution_runtime.service import ExecutionRuntimeService
 from services.repo_intelligence.service import RepoIntelligenceService
 
-from .models import AgentAction, AgentActionType, AgentRunOutcome, AgentSession, AgentSessionPhase
+from .models import AgentAction, AgentActionType, AgentRunOutcome, AgentSession, AgentSessionPhase, AgentVerification
 from .post_apply import PostApplyValidationFailure, build_post_apply_candidates, run_post_apply_validators
 from .reducer import (
     clear_pending_action,
@@ -39,7 +40,7 @@ from .reducer import (
 )
 from .session_store import AgentSessionStore
 from .service import AgentCoreService
-from .validation import AgentStateValidationError, validate_action_for_dispatch
+from .validation import AgentStateValidationError, extract_patch_changed_files, validate_action_for_dispatch
 
 MAX_PATCH_RETRIES = 2
 RETRYABLE_PATCH_FAILURE_CODES = frozenset(
@@ -49,6 +50,7 @@ RETRYABLE_PATCH_FAILURE_CODES = frozenset(
         "search_not_found",
         "ambiguous_search",
         "post_apply_validation_failed",
+        "read_only_reference_modified",
     }
 )
 _FAILURE_QUERY_PATTERN = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]{2,}\b")
@@ -352,10 +354,26 @@ class AgentCoreCoordinator:
             try:
                 review = await self._agent_core.review_patch(session, patch_action)
             except Exception as exc:
+                failure_code = getattr(exc, "failure_code", None)
+                if self._should_retry_patch_failure(failure_code, retry_count, seen_failure_codes):
+                    seen_failure_codes.add(failure_code)
+                    retry_count += 1
+                    session = record_retryable_failure(
+                        session,
+                        stage="review_patch",
+                        message=str(exc),
+                        code=failure_code,
+                    )
+                    session = self._replace_tracked_action(session, patch_intent)
+                    await self._persist_session(session)
+                    patch_action = patch_intent
+                    continue
+
                 failed_session = record_failure(
                     session,
                     stage="review_patch",
                     message=str(exc),
+                    code=failure_code,
                     action=patch_action,
                 )
                 await self._persist_session(failed_session)
@@ -454,6 +472,14 @@ class AgentCoreCoordinator:
             updated_session,
             changed_files=review.changed_files or patch_action.target_files,
         )
+        updated_session, verification_outcome = await self._run_post_patch_verification(
+            updated_session,
+            trigger_action=patch_action,
+            review=review,
+            applied_artifacts=applied_artifacts,
+        )
+        if verification_outcome is not None:
+            return updated_session, verification_outcome
         await self._persist_session(updated_session)
         return updated_session, None
 
@@ -641,10 +667,211 @@ class AgentCoreCoordinator:
             return "Command was cancelled"
         return f"Command failed with exit code {result.exit_code}"
 
+    async def _run_post_patch_verification(
+        self,
+        session: AgentSession,
+        *,
+        trigger_action: AgentAction,
+        review,
+        applied_artifacts: list[ArtifactRef],
+    ) -> tuple[AgentSession, AgentRunOutcome | None]:
+        workspace_root = await self._workspace_root_for_session(session)
+        planned_verifications = self._agent_core.plan_patch_verification(
+            session,
+            changed_files=self._changed_files_for_patch(review, trigger_action),
+            deleted_files=self._deleted_files_for_patch(review, trigger_action),
+            workspace_root=workspace_root,
+        )
+        if not planned_verifications:
+            return session, None
+
+        updated_session = session
+        for planned_verification in planned_verifications:
+            updated_session, verification_outcome = await self._execute_planned_verification(
+                updated_session,
+                trigger_action=trigger_action,
+                planned_verification=planned_verification,
+                applied_artifacts=applied_artifacts,
+            )
+            if verification_outcome is not None:
+                return updated_session, verification_outcome
+        await self._persist_session(updated_session)
+        return updated_session, None
+
+    async def _execute_planned_verification(
+        self,
+        session: AgentSession,
+        *,
+        trigger_action: AgentAction,
+        planned_verification: AgentVerification,
+        applied_artifacts: list[ArtifactRef],
+    ) -> tuple[AgentSession, AgentRunOutcome | None]:
+        if not planned_verification.command_argv:
+            updated_session = self._append_verification_result(
+                session,
+                replace(
+                    planned_verification,
+                    trigger_action_id=trigger_action.action_id,
+                ),
+            )
+            return updated_session, None
+
+        if planned_verification.kind == "fallback_pytest":
+            workspace_root = await self._workspace_root_for_session(session)
+            fallback_error = self._validate_fallback_test_command(
+                planned_verification.command_argv,
+                workspace_root=workspace_root,
+            )
+            if fallback_error is not None:
+                updated_session = self._append_verification_result(
+                    session,
+                    replace(
+                        planned_verification,
+                        kind="fallback_pytest_rejected",
+                        verification_level="functional_verification_missing",
+                        stderr=fallback_error,
+                        trigger_action_id=trigger_action.action_id,
+                    ),
+                )
+                updated_session = self._append_warning(
+                    updated_session,
+                    f"Fallback test command rejected: {fallback_error}",
+                )
+                await self._persist_session(updated_session)
+                return updated_session, None
+
+        verification_action = AgentAction(
+            type=AgentActionType.RUN_COMMAND,
+            reason="Run automatic post-patch verification",
+            target_files=planned_verification.changed_files,
+            command_argv=planned_verification.command_argv,
+        )
+        request = CommandRequest(
+            run_id=session.run_id,
+            task_id=new_task_id(),
+            argv=planned_verification.command_argv,
+        )
+
+        try:
+            result = await self._execution_runtime.execute_command(request)
+        except Exception as exc:
+            recovery_outcome = await self._runtime_recovery_outcome(
+                session,
+                verification_action,
+                applied_artifacts,
+            )
+            if recovery_outcome is not None:
+                return recovery_outcome.session, recovery_outcome
+            failed_session = self._append_verification_result(
+                session,
+                replace(
+                    planned_verification,
+                    stdout="",
+                    stderr=str(exc),
+                    failure_signature=self._verification_failure_signature(
+                        planned_verification.command_argv,
+                        CommandResult(
+                            run_id=session.run_id,
+                            task_id=request.task_id,
+                            exit_code=None,
+                            stderr=str(exc),
+                        ),
+                    ),
+                    trigger_action_id=trigger_action.action_id,
+                ),
+            )
+            failed_session = record_failure(
+                failed_session,
+                stage="verification",
+                message=str(exc),
+                action=None,
+            )
+            await self._persist_session(failed_session)
+            return failed_session, AgentRunOutcome(
+                status="failed",
+                session=failed_session,
+                last_action=trigger_action,
+                applied_artifacts=tuple(applied_artifacts),
+            )
+
+        verification_level = planned_verification.verification_level
+        if verification_level is None and planned_verification.kind == "py_compile":
+            verification_level = "syntax_only"
+        if verification_level is None and planned_verification.kind == "targeted_pytest":
+            verification_level = "targeted_tests_passed"
+        if verification_level is None and planned_verification.kind == "fallback_pytest":
+            verification_level = "fallback_tests_passed"
+        if result.exit_code not in (None, 0) and planned_verification.kind == "targeted_pytest":
+            verification_level = "targeted_tests_failed"
+        if result.exit_code not in (None, 0) and planned_verification.kind == "fallback_pytest":
+            verification_level = "fallback_tests_failed"
+        verification_result = replace(
+            planned_verification,
+            verification_level=verification_level,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            exit_code=result.exit_code,
+            failure_signature=self._verification_failure_signature(
+                planned_verification.command_argv,
+                result,
+            ) if result.exit_code not in (None, 0) else None,
+            trigger_action_id=trigger_action.action_id,
+        )
+        updated_session = self._append_verification_result(session, verification_result)
+
+        if result.timed_out or result.cancelled:
+            failed_session = record_failure(
+                updated_session,
+                stage="verification",
+                message=self._command_failure_message(result),
+                details=self._command_failure_details(verification_action, result),
+                action=None,
+            )
+            await self._persist_session(failed_session)
+            return failed_session, AgentRunOutcome(
+                status="failed",
+                session=failed_session,
+                last_action=trigger_action,
+                command_result=result,
+                applied_artifacts=tuple(applied_artifacts),
+            )
+
+        if result.exit_code not in (None, 0):
+            failed_session = record_retryable_action_failure(
+                updated_session,
+                stage="command",
+                message=self._command_failure_message(result),
+                code="command_failed",
+                action=verification_action,
+                details={
+                    **self._command_failure_details(verification_action, result),
+                    "failure_signature": verification_result.failure_signature or "",
+                    "verification_level": verification_result.verification_level or "",
+                },
+            )
+            failed_session = await self._refresh_repo_context_after_command_failure(
+                failed_session,
+                action=verification_action,
+                result=result,
+            )
+            await self._persist_session(failed_session)
+            return failed_session, None
+
+        updated_session = clear_retryable_failures(updated_session, stage="command")
+        return updated_session, None
+
     async def _persist_session(self, session: AgentSession) -> None:
         if self._session_store is None:
             return
         await self._session_store.save_agent_session(session)
+
+    async def _workspace_root_for_session(self, session: AgentSession) -> str | None:
+        if self._repo_store is None:
+            return None
+        workspace = await self._repo_store.get_workspace(session.workspace_id)
+        if workspace is None:
+            return None
+        return workspace.root_path
 
     async def _refresh_repo_context_after_patch(
         self,
@@ -865,6 +1092,111 @@ class AgentCoreCoordinator:
         if result.termination_reason is not None:
             details["termination_reason"] = result.termination_reason
         return {key: value for key, value in details.items() if value}
+
+    def _append_verification_result(
+        self,
+        session: AgentSession,
+        verification: AgentVerification,
+    ) -> AgentSession:
+        return replace(
+            session,
+            verification_history=[*session.verification_history, verification],
+        )
+
+    def _verification_failure_signature(
+        self,
+        command_argv: tuple[str, ...],
+        result: CommandResult,
+    ) -> str:
+        stderr = result.stderr.strip().splitlines()
+        stdout = result.stdout.strip().splitlines()
+        signature_input = "\n".join(
+            part
+            for part in (
+                " ".join(command_argv),
+                "" if result.exit_code is None else str(result.exit_code),
+                stderr[0] if stderr else "",
+                stdout[0] if stdout else "",
+            )
+            if part
+        )
+        digest = hashlib.sha1(signature_input.encode("utf-8")).hexdigest()[:12]
+        prefix = "verification"
+        if command_argv[0:3] == ("python", "-m", "py_compile"):
+            prefix = "py_compile"
+        elif len(command_argv) >= 3 and command_argv[1:3] == ("-m", "pytest"):
+            prefix = "pytest"
+        return f"{prefix}:{digest}"
+
+    def _changed_files_for_patch(
+        self,
+        review,
+        action: AgentAction,
+    ) -> tuple[str, ...]:
+        extracted = self._patch_change_entries(review, action)
+        if extracted:
+            return tuple(path for path, _deleted in extracted)
+        return review.changed_files or action.target_files
+
+    def _deleted_files_for_patch(
+        self,
+        review,
+        action: AgentAction,
+    ) -> tuple[str, ...]:
+        return tuple(path for path, deleted in self._patch_change_entries(review, action) if deleted)
+
+    def _patch_change_entries(
+        self,
+        review,
+        action: AgentAction,
+    ) -> tuple[tuple[str, bool], ...]:
+        patch_diff = review.patch_diff or action.patch_diff or ""
+        if not patch_diff.strip():
+            return ()
+        try:
+            return extract_patch_changed_files(patch_diff)
+        except AgentStateValidationError:
+            return ()
+
+    def _validate_fallback_test_command(
+        self,
+        command_argv: tuple[str, ...],
+        *,
+        workspace_root: str | None,
+    ) -> str | None:
+        if not command_argv:
+            return "fallback_test_command must not be empty"
+
+        rejected_fragments = ("&&", "||", ";", "|", "`", "$(", ">", "<")
+        for token in command_argv:
+            if any(fragment in token for fragment in rejected_fragments):
+                return "fallback_test_command contains a disallowed shell fragment"
+
+        if command_argv[0] not in {"python", "./.venv/bin/python", ".venv/bin/python"}:
+            return "fallback_test_command must start with python or ./.venv/bin/python"
+        if len(command_argv) < 4 or command_argv[1:3] != ("-m", "pytest"):
+            return "fallback_test_command must use the form 'python -m pytest <path>'"
+
+        target_path = command_argv[3].strip()
+        if not target_path or target_path in {".", "./"} or target_path.startswith("-"):
+            return "fallback_test_command must include a non-empty pytest target path"
+
+        if len(command_argv) > 4:
+            if len(command_argv) != 6 or command_argv[4] != "-k":
+                return "fallback_test_command only allows an optional '-k <expression>' suffix"
+            expression = command_argv[5].strip()
+            if not expression or not re.fullmatch(r"[A-Za-z0-9_ .-]+", expression):
+                return "fallback_test_command '-k' expression contains unsupported characters"
+
+        target_candidate = Path(target_path)
+        if target_candidate.is_absolute():
+            return "fallback_test_command pytest target must be workspace-relative"
+        if workspace_root is not None:
+            root = Path(workspace_root).resolve(strict=False)
+            resolved = (root / target_candidate).resolve(strict=False)
+            if not resolved.is_relative_to(root):
+                return "fallback_test_command pytest target must stay inside the workspace"
+        return None
 
     async def _search_failure_symbols(
         self,

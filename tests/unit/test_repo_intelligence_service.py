@@ -140,6 +140,101 @@ class TestLocalRepoIntelligenceService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.file_summaries[0].content, "def main():\n    return 1\n")
             self.assertIsInstance(result.warnings, tuple)
 
+    async def test_build_context_auto_adds_unique_prompt_file_mentions(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._init_git_repo(root)
+            docs = root / "docs"
+            docs.mkdir()
+            (root / "README.md").write_text("# demo\n", encoding="utf-8")
+            (docs / "plan.md").write_text("shipping notes\n", encoding="utf-8")
+            (root / "main.py").write_text("print('ok')\n", encoding="utf-8")
+            self._commit_all(root, "context with mentionable files")
+
+            service = LocalRepoIntelligenceService()
+            workspace = await service.inspect_workspace(Workspace(root_path=str(root)))
+            result = await service.build_context(
+                RepoContextRequest(
+                    workspace_id=workspace.workspace_id,
+                    run_id=new_run_id(),
+                    prompt="Please check plan.md before patching main.py",
+                    max_files=2,
+                )
+            )
+
+            self.assertEqual(result.mentioned_paths, ("docs/plan.md", "main.py"))
+            by_path = {summary.path: summary for summary in result.file_summaries}
+            self.assertEqual(by_path["docs/plan.md"].content, "shipping notes\n")
+            self.assertEqual(by_path["main.py"].content, "print('ok')\n")
+
+    async def test_build_context_skips_ambiguous_basename_mentions(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "dir1").mkdir()
+            (root / "dir2").mkdir()
+            (root / "dir1" / "file.txt").write_text("one\n", encoding="utf-8")
+            (root / "dir2" / "file.txt").write_text("two\n", encoding="utf-8")
+
+            service = LocalRepoIntelligenceService()
+            workspace = await service.inspect_workspace(Workspace(root_path=str(root)))
+            result = await service.build_context(
+                RepoContextRequest(
+                    workspace_id=workspace.workspace_id,
+                    run_id=new_run_id(),
+                    prompt="Please inspect file.txt next",
+                    max_files=1,
+                )
+            )
+
+            self.assertEqual(result.mentioned_paths, ())
+
+    async def test_build_context_includes_reference_file_summaries(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._init_git_repo(root)
+            docs = root / "docs"
+            docs.mkdir()
+            (root / "main.py").write_text("print('ok')\n", encoding="utf-8")
+            (docs / "reference.md").write_text("reference content\n", encoding="utf-8")
+            (root / "README.md").write_text("# demo\n", encoding="utf-8")
+            self._commit_all(root, "context with reference file")
+
+            service = LocalRepoIntelligenceService()
+            workspace = await service.inspect_workspace(Workspace(root_path=str(root)))
+
+            captured_chat_files: list[str] = []
+
+            class FakeRepoMap:
+                def get_repo_map(
+                    self,
+                    *,
+                    chat_files,
+                    other_files,
+                    mentioned_fnames=None,
+                    mentioned_idents=None,
+                    force_refresh=False,
+                ):
+                    del other_files, mentioned_fnames, mentioned_idents, force_refresh
+                    captured_chat_files.extend(chat_files)
+                    return "repo-map"
+
+            with patch.object(service, "_new_repo_map", return_value=FakeRepoMap()):
+                result = await service.build_context(
+                    RepoContextRequest(
+                        workspace_id=workspace.workspace_id,
+                        run_id=new_run_id(),
+                        prompt="Patch main.py using reference.md as context",
+                        target_paths=("main.py",),
+                        reference_paths=("docs/reference.md",),
+                        max_files=2,
+                    )
+                )
+
+            self.assertEqual(len(result.reference_file_summaries), 1)
+            self.assertEqual(result.reference_file_summaries[0].path, "docs/reference.md")
+            self.assertEqual(result.reference_file_summaries[0].content, "reference content\n")
+            self.assertIn(str((root / "docs" / "reference.md").resolve()), captured_chat_files)
+
     async def test_build_context_rejects_symlink_target_outside_workspace(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_root = Path(tmpdir)

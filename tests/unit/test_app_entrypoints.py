@@ -12,7 +12,7 @@ from apps.api import (
     create_platform_api,
 )
 from apps._local_support import NoopObservabilityService, WorkspaceRegistryRepoStore
-from apps.cli.app import _LocalCLIApplication
+from apps.cli.app import _LocalCLIApplication, build_cli_parser
 from apps.cli import (
     create_cli_application,
     create_local_cli_application_from_config,
@@ -67,11 +67,13 @@ class _PatchRepoIntelligence:
     def __init__(self, workspace: Workspace) -> None:
         self._workspace = workspace
         self._workspace_root = Path(workspace.root_path)
+        self.context_requests = []
 
     async def inspect_workspace(self, workspace):
         return self._workspace
 
     async def build_context(self, request):
+        self.context_requests.append(request)
         return RepoContextResult(
             workspace_id=request.workspace_id,
             run_id=request.run_id,
@@ -81,6 +83,13 @@ class _PatchRepoIntelligence:
                     content=(self._workspace_root / target_path).read_text(encoding="utf-8"),
                 )
                 for target_path in request.target_paths
+            ),
+            reference_file_summaries=tuple(
+                FileSummary(
+                    path=reference_path,
+                    content=(self._workspace_root / reference_path).read_text(encoding="utf-8"),
+                )
+                for reference_path in request.reference_paths
             ),
             repo_map="\n".join(request.target_paths),
         )
@@ -362,6 +371,57 @@ api_keys:
 
         self.assertEqual(dict(config.api_keys), {"openai": "specific-key"})
 
+    async def test_resolve_local_cli_runner_config_parses_fallback_test_command(self):
+        config = resolve_local_cli_runner_config(
+            [
+                "--fallback-test-command",
+                "python -m pytest tests/unit -k agent_core",
+                "agent-plan",
+                "--workspace",
+                ".",
+                "--prompt",
+                "Plan the work",
+            ]
+        )
+
+        self.assertEqual(
+            config.fallback_test_command,
+            ("python", "-m", "pytest", "tests/unit", "-k", "agent_core"),
+        )
+
+    async def test_cli_parser_preserves_multiple_read_only_paths_for_agent_run(self):
+        args = build_cli_parser().parse_args(
+            [
+                "agent-run",
+                "--workspace",
+                ".",
+                "--prompt",
+                "Run the agent",
+                "--read-only",
+                "docs/spec.md",
+                "--read-only",
+                "README.md",
+            ]
+        )
+
+        self.assertEqual(args.read_only, ["docs/spec.md", "README.md"])
+        self.assertEqual(args.target_path, [])
+
+    async def test_cli_parser_defaults_read_only_paths_to_empty(self):
+        args = build_cli_parser().parse_args(
+            [
+                "agent-patch",
+                "--workspace",
+                ".",
+                "--prompt",
+                "Patch app.txt",
+                "--target-path",
+                "app.txt",
+            ]
+        )
+
+        self.assertEqual(args.read_only, [])
+
     async def test_cli_agent_patch_claims_the_new_run_before_applying_side_effects(self):
         # Verifies that agent-patch claims its own newly created run instead of an older queued run before patch application.
         # This catches the live lifecycle bug where apply_patch failed with "status queued" because claim_next_run activated the wrong run.
@@ -370,6 +430,12 @@ api_keys:
             root = Path(tmpdir)
             target = root / "app.txt"
             target.write_text("before\n", encoding="utf-8")
+            docs = root / "docs"
+            docs.mkdir()
+            reference = docs / "spec.md"
+            reference.write_text("replace before with after\n", encoding="utf-8")
+            readme = root / "README.md"
+            readme.write_text("# reference\n", encoding="utf-8")
 
             workspace_store = WorkspaceRegistryRepoStore()
             workspace = Workspace(root_path=tmpdir)
@@ -415,11 +481,12 @@ api_keys:
                 execution_runtime=runtime,
                 session_store=repository,
             )
+            repo_intelligence = _PatchRepoIntelligence(workspace)
             app = _LocalCLIApplication(
                 agent_core=agent_core,
                 coordinator=coordinator,
                 execution_runtime=runtime,
-                repo_intelligence=_PatchRepoIntelligence(workspace),
+                repo_intelligence=repo_intelligence,
                 observability=NoopObservabilityService(),
                 workspace_store=workspace_store,
             )
@@ -434,6 +501,10 @@ api_keys:
                         "Modify only app.txt by replacing before with after.",
                         "--target-path",
                         "app.txt",
+                        "--read-only",
+                        "docs/spec.md",
+                        "--read-only",
+                        "README.md",
                     ]
                 )
 
@@ -453,6 +524,19 @@ api_keys:
             self.assertIsNotNone(persisted_session)
             self.assertEqual(persisted_session.phase.value, "completed")
             self.assertEqual(persisted_session.current_plan.steps[0].status.value, "succeeded")
+            self.assertEqual(
+                persisted_session.current_plan.steps[0].target_files,
+                ("app.txt",),
+            )
+            self.assertEqual(
+                [summary.path for summary in persisted_session.repo_context.reference_file_summaries],
+                ["docs/spec.md", "README.md"],
+            )
+            self.assertEqual(
+                repo_intelligence.context_requests[0].reference_paths,
+                ("docs/spec.md", "README.md"),
+            )
+            self.assertEqual(repo_intelligence.context_requests[0].target_paths, ("app.txt",))
             self.assertEqual(persisted_session.failure_history, [])
 
 
