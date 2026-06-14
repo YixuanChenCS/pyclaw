@@ -55,6 +55,22 @@ class AgentCoreService(ABC):
         """Produce the next structured action without executing it."""
 
     @abstractmethod
+    async def generate_command(
+        self,
+        session: AgentSession,
+        proposed_action: AgentAction,
+    ) -> AgentAction:
+        """Generate a concrete command payload for a previously selected command action."""
+
+    @abstractmethod
+    async def generate_patch(
+        self,
+        session: AgentSession,
+        proposed_action: AgentAction,
+    ) -> AgentAction:
+        """Generate a concrete patch proposal for a previously selected patch action."""
+
+    @abstractmethod
     async def review_patch(
         self,
         session: AgentSession,

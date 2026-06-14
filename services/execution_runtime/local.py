@@ -169,6 +169,10 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
         await self._ensure_started()
         return await self._repository.claim_next_run(worker_id, lease_seconds)
 
+    async def claim_run(self, run_id: str, worker_id: str, lease_seconds: int) -> Run | None:
+        await self._ensure_started()
+        return await self._repository.claim_run(run_id, worker_id, lease_seconds)
+
     async def execute_command(self, request: CommandRequest) -> CommandResult:
         await self._ensure_started()
         if not request.argv:

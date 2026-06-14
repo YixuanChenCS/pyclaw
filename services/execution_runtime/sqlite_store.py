@@ -6,7 +6,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 import sqlite3
-from typing import Iterator, Mapping, Sequence
+from typing import TYPE_CHECKING, Iterator, Mapping, Sequence
 
 from packages.shared_types import (
     ApprovalDecision,
@@ -34,7 +34,6 @@ from packages.shared_types import (
     build_run_status_event,
     utc_now,
 )
-from services.agent_core.models import AgentSession
 from services.agent_core.session_store import (
     AGENT_SESSION_SCHEMA_VERSION,
     deserialize_agent_session_json,
@@ -43,6 +42,9 @@ from services.agent_core.session_store import (
 
 from .events import json_dumps, json_loads, parse_datetime, run_status_event_type, serialize_datetime
 from .state_machine import TERMINAL_RUN_STATUSES, validate_run_transition
+
+if TYPE_CHECKING:
+    from services.agent_core.models import AgentSession
 
 _RECOVERY_SIDE_EFFECT_EVENT_TYPES = frozenset(
     {
@@ -74,6 +76,10 @@ class SQLiteExecutionRuntimeRepository:
 
     async def get_run(self, run_id: RunId | str) -> Run | None:
         return await asyncio.to_thread(self._get_run_sync, RunId(str(run_id)))
+
+    async def list_runs(self, workspace_id: WorkspaceId | str | None = None) -> tuple[Run, ...]:
+        typed_workspace_id = None if workspace_id is None else WorkspaceId(str(workspace_id))
+        return await asyncio.to_thread(self._list_runs_sync, typed_workspace_id)
 
     async def update_run_status(
         self,
@@ -124,6 +130,19 @@ class SQLiteExecutionRuntimeRepository:
         lease_seconds: int,
     ) -> Run | None:
         return await asyncio.to_thread(self._claim_next_run_sync, worker_id, lease_seconds)
+
+    async def claim_run(
+        self,
+        run_id: RunId | str,
+        worker_id: str,
+        lease_seconds: int,
+    ) -> Run | None:
+        return await asyncio.to_thread(
+            self._claim_run_sync,
+            RunId(str(run_id)),
+            worker_id,
+            lease_seconds,
+        )
 
     async def heartbeat_run(
         self,
@@ -495,6 +514,91 @@ class SQLiteExecutionRuntimeRepository:
             self._append_event_with_sequence_in_tx(connection, claimed.run_id, event)
             return claimed
 
+    def _claim_run_sync(self, run_id: RunId, worker_id: str, lease_seconds: int) -> Run | None:
+        now = utc_now()
+        lease_expires_at = now + timedelta(seconds=lease_seconds)
+        serialized_now = serialize_datetime(now)
+        with self._transaction("IMMEDIATE") as connection:
+            row = connection.execute(
+                """
+                SELECT *
+                FROM runs
+                WHERE run_id = ?
+                """,
+                (str(run_id),),
+            ).fetchone()
+            if row is None:
+                return None
+
+            current = self._run_from_row(row)
+            if current.status == RunStatus.RUNNING:
+                return current
+            if current.status != RunStatus.QUEUED:
+                return None
+
+            conflicting_active = connection.execute(
+                """
+                SELECT 1
+                FROM runs AS active
+                WHERE active.workspace_id = ?
+                  AND active.run_id != ?
+                  AND active.status = ?
+                  AND active.lease_expires_at IS NOT NULL
+                  AND active.lease_expires_at >= ?
+                LIMIT 1
+                """,
+                (
+                    str(current.workspace_id),
+                    str(current.run_id),
+                    RunStatus.RUNNING.value,
+                    serialized_now,
+                ),
+            ).fetchone()
+            if conflicting_active is not None:
+                return None
+
+            claimed = replace(
+                current,
+                status=RunStatus.RUNNING,
+                worker_id=worker_id,
+                attempt=current.attempt + 1,
+                lease_expires_at=lease_expires_at,
+                last_heartbeat_at=now,
+                updated_at=now,
+                started_at=current.started_at or now,
+                finished_at=None,
+            )
+            updated_rows = connection.execute(
+                """
+                UPDATE runs
+                SET status = ?, worker_id = ?, attempt = ?, lease_expires_at = ?,
+                    last_heartbeat_at = ?, updated_at = ?, started_at = ?, finished_at = ?
+                WHERE run_id = ? AND status = ?
+                """,
+                (
+                    claimed.status.value,
+                    claimed.worker_id,
+                    claimed.attempt,
+                    serialize_datetime(claimed.lease_expires_at),
+                    serialize_datetime(claimed.last_heartbeat_at),
+                    serialize_datetime(claimed.updated_at),
+                    serialize_datetime(claimed.started_at),
+                    serialize_datetime(claimed.finished_at),
+                    str(claimed.run_id),
+                    RunStatus.QUEUED.value,
+                ),
+            ).rowcount
+            if updated_rows != 1:
+                return None
+
+            event = build_run_status_event(
+                claimed,
+                EventType.RUN_STARTED,
+                payload={"worker_id": worker_id, "attempt": claimed.attempt},
+            )
+            self._append_event_with_sequence_in_tx(connection, claimed.run_id, event)
+            return claimed
+
     def _heartbeat_run_sync(
         self,
         run_id: RunId,
@@ -652,6 +756,30 @@ class SQLiteExecutionRuntimeRepository:
         finally:
             connection.close()
         return tuple(self._artifact_from_row(row) for row in rows)
+
+    def _list_runs_sync(self, workspace_id: WorkspaceId | None) -> tuple[Run, ...]:
+        connection = self._connect()
+        try:
+            if workspace_id is None:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM runs
+                    ORDER BY created_at DESC, run_id DESC
+                    """
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM runs
+                    WHERE workspace_id = ?
+                    ORDER BY created_at DESC, run_id DESC
+                    """,
+                    (str(workspace_id),),
+                ).fetchall()
+        finally:
+            connection.close()
+
+        return tuple(self._run_from_row(row) for row in rows)
 
     def _create_approval_request_sync(self, request: ApprovalRequest) -> RunEvent:
         with self._transaction("IMMEDIATE") as connection:

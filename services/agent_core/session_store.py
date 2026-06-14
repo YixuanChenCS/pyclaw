@@ -154,10 +154,17 @@ def _agent_action_from_dict(payload: Mapping[str, Any]) -> AgentAction:
 
 
 def _agent_failure_from_dict(payload: Mapping[str, Any]) -> AgentFailure:
+    details = payload.get("details", {})
+    if details is None:
+        details = {}
+    if not isinstance(details, Mapping):
+        raise ValueError("AgentFailure.details must be an object")
     return AgentFailure(
         stage=str(payload["stage"]),
         message=str(payload["message"]),
+        code=_optional_str(payload.get("code")),
         retryable=bool(payload.get("retryable", False)),
+        details={str(key): str(value) for key, value in details.items()},
     )
 
 
@@ -179,6 +186,7 @@ def _repo_context_from_dict(payload: Mapping[str, Any]) -> RepoContextResult:
                 path=str(item["path"]),
                 summary=_optional_str(item.get("summary")),
                 language=_optional_str(item.get("language")),
+                content=_optional_str(item.get("content")),
             )
             for item in _require_mapping_list(payload.get("file_summaries", []), "file_summaries")
         ),

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import AsyncIterator, Protocol, Sequence
+from typing import AsyncIterator, Mapping, Protocol, Sequence
 
 from .models import (
     Artifact,
@@ -26,7 +26,13 @@ from .ids import EventId, RunId, SessionId, WorkspaceId
 
 
 class LLMProvider(Protocol):
-    async def complete(self, messages: Sequence[LLMMessage], model: str) -> LLMResponse:
+    async def complete(
+        self,
+        messages: Sequence[LLMMessage],
+        model: str,
+        *,
+        response_format: Mapping[str, object] | None = None,
+    ) -> LLMResponse:
         """Return a single non-streaming completion."""
 
     async def stream(self, messages: Sequence[LLMMessage], model: str) -> AsyncIterator[str]:

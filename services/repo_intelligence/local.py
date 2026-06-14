@@ -302,10 +302,12 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
             warnings.append(self._warning(ErrorCode.REPO_INDEX_FAILED, str(git_repo.git_repo_error)))
 
         root = Path(workspace.root_path)
+        requested_target_paths = tuple(request.target_paths)
         file_summaries = tuple(
             await self.summarize_files(
                 workspace,
                 tuple(self._rel_path(root, path) for path in context_files),
+                include_content_paths=requested_target_paths,
             )
         )
 
@@ -363,8 +365,13 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
         self,
         workspace: WorkspaceRef,
         files: Sequence[str],
+        include_content_paths: Sequence[str] = (),
     ) -> Sequence[FileSummary]:
         root = Path(workspace.root_path)
+        include_content_rel_paths = {
+            self._rel_path(root, self._resolve_workspace_member(root, raw_path))
+            for raw_path in include_content_paths
+        }
         summaries: list[FileSummary] = []
         for raw_file in files:
             try:
@@ -411,7 +418,17 @@ class LocalRepoIntelligenceService(RepoIntelligenceService):
             summary = f"{size} bytes"
             if snippet:
                 summary = f"{summary} | {snippet}"
-            summaries.append(FileSummary(path=rel_path, summary=summary, language=language))
+            content = None
+            if rel_path in include_content_rel_paths:
+                content = path.read_text(encoding="utf-8", errors="replace")
+            summaries.append(
+                FileSummary(
+                    path=rel_path,
+                    summary=summary,
+                    language=language,
+                    content=content,
+                )
+            )
 
         return summaries
 

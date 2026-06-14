@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
+import re
 
 from packages.shared_types import (
     ApprovalDecision,
@@ -8,6 +10,8 @@ from packages.shared_types import (
     ArtifactRef,
     CommandRequest,
     CommandResult,
+    RepoContextRequest,
+    RepoStore,
     PatchProposal,
     RecoveryStatus,
     RunResult,
@@ -16,15 +20,20 @@ from packages.shared_types import (
     new_task_id,
 )
 from services.execution_runtime.service import ExecutionRuntimeService
+from services.repo_intelligence.service import RepoIntelligenceService
 
 from .models import AgentAction, AgentActionType, AgentRunOutcome, AgentSession, AgentSessionPhase
+from .post_apply import PostApplyValidationFailure, build_post_apply_candidates, run_post_apply_validators
 from .reducer import (
     clear_pending_action,
     clear_pending_approval,
+    clear_retryable_failures,
     ensure_action_id,
     has_completed_action,
     record_action_success,
     record_failure,
+    record_retryable_action_failure,
+    record_retryable_failure,
     record_selected_action,
     set_pending_approval,
 )
@@ -32,9 +41,41 @@ from .session_store import AgentSessionStore
 from .service import AgentCoreService
 from .validation import AgentStateValidationError, validate_action_for_dispatch
 
+MAX_PATCH_RETRIES = 2
+RETRYABLE_PATCH_FAILURE_CODES = frozenset(
+    {
+        "json_parse_failed",
+        "schema_invalid",
+        "search_not_found",
+        "ambiguous_search",
+        "post_apply_validation_failed",
+    }
+)
+_FAILURE_QUERY_PATTERN = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]{2,}\b")
+_FAILURE_QUERY_STOPWORDS = frozenset(
+    {
+        "assertionerror",
+        "error",
+        "errors",
+        "exception",
+        "failed",
+        "failure",
+        "traceback",
+        "tests",
+        "test",
+        "python",
+        "line",
+        "file",
+        "warning",
+    }
+)
+
 
 class AgentCoreCoordinator:
     """Thin orchestration layer that dispatches validated agent actions to the runtime."""
+
+    _CLAIM_LEASE_SECONDS = 30
+    _CLAIM_WORKER_ID = "agent-core-coordinator"
 
     def __init__(
         self,
@@ -42,10 +83,14 @@ class AgentCoreCoordinator:
         agent_core: AgentCoreService,
         execution_runtime: ExecutionRuntimeService,
         session_store: AgentSessionStore | None = None,
+        repo_intelligence: RepoIntelligenceService | None = None,
+        repo_store: RepoStore | None = None,
     ) -> None:
         self._agent_core = agent_core
         self._execution_runtime = execution_runtime
         self._session_store = session_store
+        self._repo_intelligence = repo_intelligence
+        self._repo_store = repo_store
 
     async def run(self, session: AgentSession) -> AgentRunOutcome:
         current_session = session
@@ -77,7 +122,15 @@ class AgentCoreCoordinator:
                 continue
 
             current_session, action = await self._select_action(current_session)
-            validate_action_for_dispatch(action)
+            if action.type not in {AgentActionType.PROPOSE_PATCH, AgentActionType.RUN_COMMAND} or (
+                action.type == AgentActionType.PROPOSE_PATCH
+                and action.patch_diff is not None
+                and action.patch_diff.strip()
+            ) or (
+                action.type == AgentActionType.RUN_COMMAND
+                and action.command_argv
+            ):
+                validate_action_for_dispatch(action)
 
             if action.type == AgentActionType.ASK_CONTEXT:
                 return AgentRunOutcome(
@@ -107,6 +160,7 @@ class AgentCoreCoordinator:
                 return await self._request_approval(current_session, action, applied_artifacts)
 
             if action.type == AgentActionType.PROPOSE_PATCH:
+                await self._ensure_runtime_run_active(current_session)
                 current_session, review_outcome = await self._apply_reviewed_patch(
                     current_session,
                     action,
@@ -118,6 +172,7 @@ class AgentCoreCoordinator:
                 continue
 
             if action.type == AgentActionType.RUN_COMMAND:
+                await self._ensure_runtime_run_active(current_session)
                 current_session, command_outcome = await self._run_command(
                     current_session,
                     action,
@@ -128,6 +183,7 @@ class AgentCoreCoordinator:
                 continue
 
             if action.type == AgentActionType.COMPLETE:
+                await self._ensure_runtime_run_active(current_session)
                 run_result = RunResult(
                     run_id=current_session.run_id,
                     status=RunStatus.SUCCEEDED,
@@ -249,65 +305,195 @@ class AgentCoreCoordinator:
         action: AgentAction,
         applied_artifacts: list[ArtifactRef],
     ) -> tuple[AgentSession, AgentRunOutcome | None]:
-        try:
-            review = await self._agent_core.review_patch(session, action)
-        except Exception as exc:
-            failed_session = record_failure(session, stage="review_patch", message=str(exc), action=action)
-            await self._persist_session(failed_session)
-            return failed_session, AgentRunOutcome(
-                status="failed",
-                session=failed_session,
-                last_action=action,
-                applied_artifacts=tuple(applied_artifacts),
-            )
+        patch_intent = self._reset_patch_action(action)
+        patch_action = action
+        review = None
+        retry_count = 0
+        seen_failure_codes: set[str] = set()
 
-        if not review.accepted:
-            failed_session = record_failure(
-                session,
-                stage="review_patch",
-                message=review.reason,
-                action=action,
-            )
-            await self._persist_session(failed_session)
-            return failed_session, AgentRunOutcome(
-                status="failed",
-                session=failed_session,
-                last_action=action,
-                patch_review=review,
-                applied_artifacts=tuple(applied_artifacts),
-            )
+        while True:
+            if patch_action.patch_diff is None or not patch_action.patch_diff.strip():
+                try:
+                    patch_action = await self._agent_core.generate_patch(session, patch_intent)
+                except Exception as exc:
+                    failure_code = getattr(exc, "failure_code", None)
+                    if self._should_retry_patch_failure(failure_code, retry_count, seen_failure_codes):
+                        seen_failure_codes.add(failure_code)
+                        retry_count += 1
+                        session = record_retryable_failure(
+                            session,
+                            stage="generate_patch",
+                            message=str(exc),
+                            code=failure_code,
+                        )
+                        session = self._replace_tracked_action(session, patch_intent)
+                        await self._persist_session(session)
+                        patch_action = patch_intent
+                        continue
+
+                    failed_session = record_failure(
+                        session,
+                        stage="generate_patch",
+                        message=str(exc),
+                        code=failure_code,
+                        action=patch_intent,
+                    )
+                    await self._persist_session(failed_session)
+                    return failed_session, AgentRunOutcome(
+                        status="failed",
+                        session=failed_session,
+                        last_action=patch_intent,
+                        applied_artifacts=tuple(applied_artifacts),
+                    )
+
+                session = self._replace_tracked_action(session, patch_action)
+                await self._persist_session(session)
+
+            try:
+                review = await self._agent_core.review_patch(session, patch_action)
+            except Exception as exc:
+                failed_session = record_failure(
+                    session,
+                    stage="review_patch",
+                    message=str(exc),
+                    action=patch_action,
+                )
+                await self._persist_session(failed_session)
+                return failed_session, AgentRunOutcome(
+                    status="failed",
+                    session=failed_session,
+                    last_action=patch_action,
+                    applied_artifacts=tuple(applied_artifacts),
+                )
+
+            if not review.accepted:
+                failed_session = record_failure(
+                    session,
+                    stage="review_patch",
+                    message=review.reason,
+                    action=patch_action,
+                )
+                await self._persist_session(failed_session)
+                return failed_session, AgentRunOutcome(
+                    status="failed",
+                    session=failed_session,
+                    last_action=patch_action,
+                    patch_review=review,
+                    applied_artifacts=tuple(applied_artifacts),
+                )
+
+            try:
+                self._validate_post_apply_patch(session, patch_action)
+            except PostApplyValidationFailure as exc:
+                failure_code = getattr(exc, "failure_code", None)
+                if self._should_retry_patch_failure(failure_code, retry_count, seen_failure_codes):
+                    seen_failure_codes.add(failure_code)
+                    retry_count += 1
+                    session = record_retryable_failure(
+                        session,
+                        stage="post_apply_validation",
+                        message=str(exc),
+                        code=failure_code,
+                    )
+                    session = self._replace_tracked_action(session, patch_intent)
+                    await self._persist_session(session)
+                    patch_action = patch_intent
+                    continue
+
+                failed_session = record_failure(
+                    session,
+                    stage="post_apply_validation",
+                    message=str(exc),
+                    code=failure_code,
+                    action=patch_action,
+                )
+                await self._persist_session(failed_session)
+                return failed_session, AgentRunOutcome(
+                    status="failed",
+                    session=failed_session,
+                    last_action=patch_action,
+                    patch_review=review,
+                    applied_artifacts=tuple(applied_artifacts),
+                )
+
+            break
+
+        assert review is not None
 
         proposal = PatchProposal(
             run_id=session.run_id,
-            task_id=action.action_id or new_task_id(),
-            summary=action.reason,
-            unified_diff=review.patch_diff or action.patch_diff or "",
-            target_paths=review.changed_files or action.target_files,
+            task_id=patch_action.action_id or new_task_id(),
+            summary=patch_action.reason,
+            unified_diff=review.patch_diff or patch_action.patch_diff or "",
+            target_paths=review.changed_files or patch_action.target_files,
         )
 
         try:
             artifact = await self._execution_runtime.apply_patch(str(session.run_id), proposal)
         except Exception as exc:
-            recovery_outcome = await self._runtime_recovery_outcome(
-                session,
-                action,
-                applied_artifacts,
-            )
+            recovery_outcome = await self._runtime_recovery_outcome(session, patch_action, applied_artifacts)
             if recovery_outcome is not None:
                 return recovery_outcome.session, recovery_outcome
-            failed_session = record_failure(session, stage="patch_apply", message=str(exc), action=action)
+            failed_session = record_failure(
+                session,
+                stage="patch_apply",
+                message=str(exc),
+                action=patch_action,
+            )
             await self._persist_session(failed_session)
             return failed_session, AgentRunOutcome(
                 status="failed",
                 session=failed_session,
-                last_action=action,
+                last_action=patch_action,
                 patch_review=review,
                 applied_artifacts=tuple(applied_artifacts),
             )
 
-        updated_session = record_action_success(session, action, artifact=artifact)
+        updated_session = record_action_success(session, patch_action, artifact=artifact)
+        updated_session = await self._refresh_repo_context_after_patch(
+            updated_session,
+            changed_files=review.changed_files or patch_action.target_files,
+        )
         await self._persist_session(updated_session)
         return updated_session, None
+
+    def _should_retry_patch_failure(
+        self,
+        failure_code: str | None,
+        retry_count: int,
+        seen_failure_codes: set[str],
+    ) -> bool:
+        if failure_code not in RETRYABLE_PATCH_FAILURE_CODES:
+            return False
+        if retry_count >= MAX_PATCH_RETRIES:
+            return False
+        if failure_code in seen_failure_codes:
+            return False
+        return True
+
+    def _reset_patch_action(self, action: AgentAction) -> AgentAction:
+        return AgentAction(
+            type=action.type,
+            reason=action.reason,
+            step_id=action.step_id,
+            action_id=action.action_id,
+            target_files=action.target_files,
+            command_argv=action.command_argv,
+            cwd=action.cwd,
+            allow_file_deletions=False,
+            approval_message=action.approval_message,
+            approval_risk_reason=action.approval_risk_reason,
+            summary_text=action.summary_text,
+            requested_context=action.requested_context,
+        )
+
+    def _validate_post_apply_patch(
+        self,
+        session: AgentSession,
+        action: AgentAction,
+    ) -> None:
+        candidates = build_post_apply_candidates(session, patch_diff=action.patch_diff or "")
+        run_post_apply_validators(candidates)
 
     async def _run_command(
         self,
@@ -315,11 +501,34 @@ class AgentCoreCoordinator:
         action: AgentAction,
         applied_artifacts: list[ArtifactRef],
     ) -> tuple[AgentSession, AgentRunOutcome | None]:
+        command_action = action
+        if not command_action.command_argv:
+            try:
+                command_action = await self._agent_core.generate_command(session, action)
+            except Exception as exc:
+                failed_session = record_failure(
+                    session,
+                    stage="generate_command",
+                    message=str(exc),
+                    action=action,
+                )
+                await self._persist_session(failed_session)
+                return failed_session, AgentRunOutcome(
+                    status="failed",
+                    session=failed_session,
+                    last_action=action,
+                    applied_artifacts=tuple(applied_artifacts),
+                )
+
+            session = self._replace_tracked_action(session, command_action)
+            await self._persist_session(session)
+            validate_action_for_dispatch(command_action)
+
         request = CommandRequest(
             run_id=session.run_id,
-            task_id=action.action_id or new_task_id(),
-            argv=action.command_argv,
-            cwd=action.cwd,
+            task_id=command_action.action_id or new_task_id(),
+            argv=command_action.command_argv,
+            cwd=command_action.cwd,
         )
 
         try:
@@ -327,37 +536,61 @@ class AgentCoreCoordinator:
         except Exception as exc:
             recovery_outcome = await self._runtime_recovery_outcome(
                 session,
-                action,
+                command_action,
                 applied_artifacts,
             )
             if recovery_outcome is not None:
                 return recovery_outcome.session, recovery_outcome
-            failed_session = record_failure(session, stage="command", message=str(exc), action=action)
+            failed_session = record_failure(
+                session,
+                stage="command",
+                message=str(exc),
+                action=command_action,
+            )
             await self._persist_session(failed_session)
             return failed_session, AgentRunOutcome(
                 status="failed",
                 session=failed_session,
-                last_action=action,
+                last_action=command_action,
                 applied_artifacts=tuple(applied_artifacts),
             )
 
-        if result.exit_code not in (None, 0) or result.timed_out or result.cancelled:
+        if result.timed_out or result.cancelled:
             failed_session = record_failure(
                 session,
                 stage="command",
                 message=self._command_failure_message(result),
-                action=action,
+                details=self._command_failure_details(command_action, result),
+                action=command_action,
             )
             await self._persist_session(failed_session)
             return failed_session, AgentRunOutcome(
                 status="failed",
                 session=failed_session,
-                last_action=action,
+                last_action=command_action,
                 command_result=result,
                 applied_artifacts=tuple(applied_artifacts),
             )
 
-        updated_session = record_action_success(session, action)
+        if result.exit_code not in (None, 0):
+            failed_session = record_retryable_action_failure(
+                session,
+                stage="command",
+                message=self._command_failure_message(result),
+                code="command_failed",
+                action=command_action,
+                details=self._command_failure_details(command_action, result),
+            )
+            failed_session = await self._refresh_repo_context_after_command_failure(
+                failed_session,
+                action=command_action,
+                result=result,
+            )
+            await self._persist_session(failed_session)
+            return failed_session, None
+
+        updated_session = record_action_success(session, command_action)
+        updated_session = clear_retryable_failures(updated_session, stage="command")
         await self._persist_session(updated_session)
         return updated_session, None
 
@@ -413,6 +646,148 @@ class AgentCoreCoordinator:
             return
         await self._session_store.save_agent_session(session)
 
+    async def _refresh_repo_context_after_patch(
+        self,
+        session: AgentSession,
+        *,
+        changed_files: tuple[str, ...],
+    ) -> AgentSession:
+        if self._repo_intelligence is None or self._repo_store is None or not changed_files:
+            return session
+
+        workspace = await self._repo_store.get_workspace(session.workspace_id)
+        if workspace is None:
+            return self._append_warning(
+                session,
+                f"repo_intelligence refresh skipped: workspace {session.workspace_id} is unavailable",
+            )
+
+        try:
+            await self._repo_intelligence.refresh_index(workspace, changed_files)
+            impact = await self._repo_intelligence.analyze_impact(workspace, changed_files)
+            refreshed_context = await self._repo_intelligence.build_context(
+                RepoContextRequest(
+                    workspace_id=session.workspace_id,
+                    run_id=session.run_id,
+                    prompt=session.user_request,
+                    target_paths=impact.impacted_paths or changed_files,
+                )
+            )
+        except Exception as exc:
+            return self._append_warning(
+                session,
+                f"repo_intelligence refresh after patch failed: {exc}",
+            )
+
+        merged_warnings = self._merge_warnings(
+            session.warnings,
+            impact.warnings,
+            refreshed_context.warnings,
+        )
+        refreshed_context = replace(
+            refreshed_context,
+            warnings=tuple(self._merge_warnings(impact.warnings, refreshed_context.warnings)),
+        )
+        return replace(
+            session,
+            repo_context=refreshed_context,
+            warnings=merged_warnings,
+        )
+
+    async def _refresh_repo_context_after_command_failure(
+        self,
+        session: AgentSession,
+        *,
+        action: AgentAction,
+        result: CommandResult,
+    ) -> AgentSession:
+        if self._repo_intelligence is None or self._repo_store is None:
+            return session
+
+        workspace = await self._repo_store.get_workspace(session.workspace_id)
+        if workspace is None:
+            return self._append_warning(
+                session,
+                f"repo_intelligence command-failure refresh skipped: workspace {session.workspace_id} is unavailable",
+            )
+
+        target_paths = tuple(action.target_files) or self._repo_context_paths(session)
+        warnings: list[str] = []
+        symbol_matches = ()
+        try:
+            symbol_matches = await self._search_failure_symbols(workspace, session, action, result)
+        except Exception as exc:
+            warnings.append(f"repo_intelligence symbol search after command failure failed: {exc}")
+
+        try:
+            impact = await self._repo_intelligence.analyze_impact(workspace, target_paths)
+        except Exception as exc:
+            warnings.append(f"repo_intelligence impact analysis after command failure failed: {exc}")
+            impact = None
+
+        context_target_paths = self._merge_target_paths(
+            target_paths,
+            tuple(match.path for match in symbol_matches),
+            impact.impacted_paths if impact is not None else (),
+        )
+        if not context_target_paths:
+            context_target_paths = target_paths
+
+        try:
+            refreshed_context = await self._repo_intelligence.build_context(
+                RepoContextRequest(
+                    workspace_id=session.workspace_id,
+                    run_id=session.run_id,
+                    prompt=self._command_failure_prompt(session, action, result),
+                    target_paths=context_target_paths,
+                )
+            )
+        except Exception as exc:
+            return self._append_warning(
+                session,
+                f"repo_intelligence build_context after command failure failed: {exc}",
+            )
+
+        merged_symbols = tuple(self._merge_symbol_matches(
+            session.repo_context.symbols if session.repo_context is not None else (),
+            symbol_matches,
+            refreshed_context.symbols,
+        ))
+        merged_warning_values = self._merge_warnings(
+            session.warnings,
+            warnings,
+            impact.warnings if impact is not None else (),
+            refreshed_context.warnings,
+        )
+        refreshed_context = replace(
+            refreshed_context,
+            symbols=merged_symbols,
+            warnings=tuple(self._merge_warnings(
+                warnings,
+                impact.warnings if impact is not None else (),
+                refreshed_context.warnings,
+            )),
+        )
+        return replace(
+            session,
+            repo_context=refreshed_context,
+            warnings=merged_warning_values,
+        )
+
+    async def _ensure_runtime_run_active(self, session: AgentSession) -> None:
+        claim_run = getattr(self._execution_runtime, "claim_run", None)
+        if not callable(claim_run):
+            return
+        claimed = await claim_run(
+            str(session.run_id),
+            self._CLAIM_WORKER_ID,
+            self._CLAIM_LEASE_SECONDS,
+        )
+        if claimed is None:
+            raise AgentStateValidationError(
+                f"Run {session.run_id} could not be claimed before executing side effects"
+            )
+
     async def _load_session(self, run_id: str) -> AgentSession:
         if self._session_store is None:
             raise AgentStateValidationError("Coordinator resume requires a session_store")
@@ -420,6 +795,18 @@ class AgentCoreCoordinator:
         if session is None:
             raise AgentStateValidationError(f"No persisted AgentSession found for run {run_id}")
         return session
+
+    def _replace_tracked_action(self, session: AgentSession, action: AgentAction) -> AgentSession:
+        updated_history = list(session.action_history)
+        if action.action_id is not None:
+            for index, existing in enumerate(updated_history):
+                if existing.action_id == action.action_id:
+                    updated_history[index] = action
+                    break
+        pending_action = session.pending_action
+        if pending_action is not None and pending_action.action_id == action.action_id:
+            pending_action = action
+        return replace(session, action_history=updated_history, pending_action=pending_action)
 
     async def _runtime_recovery_outcome(
         self,
@@ -444,3 +831,139 @@ class AgentCoreCoordinator:
             recovery_status=recovery_status,
             applied_artifacts=tuple(applied_artifacts),
         )
+
+    def _append_warning(self, session: AgentSession, warning: str) -> AgentSession:
+        return replace(
+            session,
+            warnings=self._merge_warnings(session.warnings, (warning,)),
+        )
+
+    def _merge_warnings(self, *warning_groups: tuple[str, ...] | list[str]) -> list[str]:
+        merged: list[str] = []
+        seen: set[str] = set()
+        for warning_group in warning_groups:
+            for warning in warning_group:
+                if not warning or warning in seen:
+                    continue
+                seen.add(warning)
+                merged.append(warning)
+        return merged
+
+    def _command_failure_details(
+        self,
+        action: AgentAction,
+        result: CommandResult,
+    ) -> dict[str, str]:
+        details = {
+            "exit_code": "" if result.exit_code is None else str(result.exit_code),
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "command_argv": " ".join(action.command_argv),
+        }
+        if action.cwd is not None:
+            details["cwd"] = action.cwd
+        if result.termination_reason is not None:
+            details["termination_reason"] = result.termination_reason
+        return {key: value for key, value in details.items() if value}
+
+    async def _search_failure_symbols(
+        self,
+        workspace,
+        session: AgentSession,
+        action: AgentAction,
+        result: CommandResult,
+    ):
+        if self._repo_intelligence is None:
+            return ()
+
+        matches = []
+        seen = set()
+        for query in self._command_failure_queries(session, action, result):
+            query_matches = await self._repo_intelligence.search_symbols(workspace, query)
+            for match in query_matches:
+                key = (match.name, match.kind, match.path, match.line)
+                if key in seen:
+                    continue
+                seen.add(key)
+                matches.append(match)
+            if len(matches) >= 12:
+                break
+        return tuple(matches[:12])
+
+    def _command_failure_queries(
+        self,
+        session: AgentSession,
+        action: AgentAction,
+        result: CommandResult,
+    ) -> tuple[str, ...]:
+        candidates: list[str] = []
+        candidate_text = "\n".join(
+            part
+            for part in (
+                result.stderr,
+                result.stdout,
+                session.user_request,
+                " ".join(action.target_files),
+            )
+            if part
+        )
+        for token in _FAILURE_QUERY_PATTERN.findall(candidate_text):
+            lowered = token.lower()
+            if lowered in _FAILURE_QUERY_STOPWORDS:
+                continue
+            if token not in candidates:
+                candidates.append(token)
+            if len(candidates) >= 5:
+                break
+
+        if not candidates:
+            for path in action.target_files:
+                stem = Path(path).stem
+                if stem and stem.lower() not in _FAILURE_QUERY_STOPWORDS:
+                    candidates.append(stem)
+                    break
+        return tuple(candidates)
+
+    def _command_failure_prompt(
+        self,
+        session: AgentSession,
+        action: AgentAction,
+        result: CommandResult,
+    ) -> str:
+        message = self._command_failure_message(result)
+        details = self._command_failure_details(action, result)
+        serialized_details = "\n".join(f"{key}: {value}" for key, value in details.items())
+        return (
+            f"{session.user_request}\n\n"
+            f"Verification command failed.\n"
+            f"{message}\n"
+            f"{serialized_details}"
+        )
+
+    def _repo_context_paths(self, session: AgentSession) -> tuple[str, ...]:
+        if session.repo_context is None:
+            return ()
+        return tuple(item.path for item in session.repo_context.file_summaries if item.path)
+
+    def _merge_target_paths(self, *groups: tuple[str, ...]) -> tuple[str, ...]:
+        merged: list[str] = []
+        seen: set[str] = set()
+        for group in groups:
+            for path in group:
+                if not path or path in seen:
+                    continue
+                seen.add(path)
+                merged.append(path)
+        return tuple(merged)
+
+    def _merge_symbol_matches(self, *groups) -> list:
+        merged = []
+        seen = set()
+        for group in groups:
+            for match in group:
+                key = (match.name, match.kind, match.path, match.line)
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(match)
+        return merged

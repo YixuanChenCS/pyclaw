@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
-import re
-import shlex
 from typing import Iterable
 from typing import Sequence
 
@@ -11,6 +9,12 @@ from packages.shared_types import ArtifactRef, RepoContextResult, TaskStatus
 from packages.shared_types.ids import RunId, WorkspaceId
 
 from .model_client import ModelClient
+from .edit_blocks import (
+    SearchReplaceApplicationError,
+    SearchReplaceEdit,
+    apply_search_replace_edits,
+    build_unified_diff,
+)
 from .models import (
     AgentAction,
     AgentActionType,
@@ -24,14 +28,22 @@ from .models import (
     RunSummary,
 )
 from .prompts import render_create_plan_prompt
+from .prompts import render_generate_command_prompt
+from .prompts import render_generate_patch_prompt
 from .reducer import ensure_action_id
 from .session_store import AgentSessionStore
 from .service import AgentCoreService
 from .validation import (
+    AgentCommandValidationError,
+    AgentPatchGenerationError,
+    AgentPatchValidationError,
     AgentStateValidationError,
     evaluate_loop_guard,
     extract_patch_changed_files,
     parse_json_object,
+    validate_command_payload,
+    validate_patch_intent_payload,
+    validate_patch_diff_against_session,
     validate_review_patch_action,
     validate_next_action_session,
     validate_plan_payload,
@@ -41,8 +53,6 @@ from .validation import (
 
 class LocalAgentCoreService(AgentCoreService):
     """Headless local agent-core skeleton with no runtime or model side effects."""
-
-    _COMMAND_HINT_RE = re.compile(r"`([^`]+)`")
 
     def __init__(
         self,
@@ -152,6 +162,10 @@ class LocalAgentCoreService(AgentCoreService):
         assert plan is not None
 
         latest_failure = self._latest_failure(session)
+        recovery_action = self._action_for_retryable_failure(session, latest_failure)
+        if recovery_action is not None:
+            return recovery_action
+
         if latest_failure is not None:
             return AgentAction(
                 type=AgentActionType.REQUEST_APPROVAL,
@@ -190,6 +204,93 @@ class LocalAgentCoreService(AgentCoreService):
 
         return self._action_for_step(session, plan, next_step)
 
+    async def generate_command(
+        self,
+        session: AgentSession,
+        proposed_action: AgentAction,
+    ) -> AgentAction:
+        validate_session_basic_shape(session)
+        if proposed_action.type != AgentActionType.RUN_COMMAND:
+            raise AgentStateValidationError("generate_command requires a run_command action")
+        if self._model_client is None:
+            raise RuntimeError("LocalAgentCoreService requires a model_client for generate_command")
+        if proposed_action.command_argv:
+            return proposed_action
+
+        prompt = render_generate_command_prompt(session, proposed_action)
+        response = await self._model_client.complete_json(prompt)
+
+        if isinstance(response, str):
+            payload = parse_json_object(
+                response,
+                malformed_message="Model returned malformed command JSON",
+                object_message="Command response must be a JSON object",
+                error_type=AgentCommandValidationError,
+            )
+        elif isinstance(response, Mapping):
+            payload = response
+        else:
+            raise TypeError("ModelClient.complete_json must return a JSON string or mapping")
+
+        normalized = validate_command_payload(payload)
+        return replace(
+            proposed_action,
+            command_argv=normalized["command_argv"],
+            cwd=normalized["cwd"],
+        )
+
+    async def generate_patch(
+        self,
+        session: AgentSession,
+        proposed_action: AgentAction,
+    ) -> AgentAction:
+        validate_session_basic_shape(session)
+        if proposed_action.type != AgentActionType.PROPOSE_PATCH:
+            raise AgentStateValidationError("generate_patch requires a propose_patch action")
+        if self._model_client is None:
+            raise RuntimeError("LocalAgentCoreService requires a model_client for generate_patch")
+        if proposed_action.patch_diff is not None and proposed_action.patch_diff.strip():
+            return proposed_action
+
+        prompt = render_generate_patch_prompt(session, proposed_action)
+        response = await self._model_client.complete_json(prompt)
+
+        if isinstance(response, str):
+            try:
+                payload = parse_json_object(
+                    response,
+                    malformed_message="Model returned malformed patch JSON",
+                    object_message="Patch response must be a JSON object",
+                    error_type=AgentPatchValidationError,
+                )
+            except AgentPatchValidationError as exc:
+                raise AgentPatchGenerationError("json_parse_failed", str(exc)) from exc
+        elif isinstance(response, Mapping):
+            payload = response
+        else:
+            raise TypeError("ModelClient.complete_json must return a JSON string or mapping")
+
+        try:
+            normalized = validate_patch_intent_payload(
+                payload,
+                allowed_paths=proposed_action.target_files,
+            )
+        except AgentPatchValidationError as exc:
+            raise AgentPatchGenerationError("schema_invalid", str(exc)) from exc
+
+        patch_diff = self._build_patch_diff_from_search_replace_intent(
+            session,
+            proposed_action,
+            normalized["path"],
+            normalized["search"],
+            normalized["replace"],
+        )
+        return replace(
+            proposed_action,
+            patch_diff=str(patch_diff),
+            allow_file_deletions=False,
+        )
+
     async def review_patch(
         self,
         session: AgentSession,
@@ -198,8 +299,8 @@ class LocalAgentCoreService(AgentCoreService):
         validate_session_basic_shape(session)
         validate_review_patch_action(proposed_action)
 
+        changed_paths = validate_patch_diff_against_session(session, proposed_action)
         changed_files = extract_patch_changed_files(proposed_action.patch_diff or "")
-        changed_paths = tuple(path for path, _deleted in changed_files)
 
         if any(deleted for _path, deleted in changed_files) and not proposed_action.allow_file_deletions:
             raise AgentStateValidationError(
@@ -219,6 +320,85 @@ class LocalAgentCoreService(AgentCoreService):
             changed_files=changed_paths,
             patch_diff=proposed_action.patch_diff,
         )
+
+    def _build_patch_diff_from_search_replace_intent(
+        self,
+        session: AgentSession,
+        proposed_action: AgentAction,
+        path: str,
+        search: str,
+        replace_text: str,
+    ) -> str:
+        if not proposed_action.target_files:
+            raise AgentPatchGenerationError(
+                "schema_invalid",
+                "Patch generation requires target_files for structured edit intent",
+            )
+
+        original_contents = self._repo_context_file_contents_for_targets(session, proposed_action.target_files)
+        if path not in proposed_action.target_files:
+            raise AgentPatchGenerationError(
+                "schema_invalid",
+                f"Patch response referenced files outside the current action targets: {path!r}",
+            )
+
+        try:
+            updated_contents = apply_search_replace_edits(
+                original_contents,
+                (
+                    SearchReplaceEdit(
+                        path=path,
+                        search=search,
+                        replace=replace_text,
+                    ),
+                ),
+            )
+        except SearchReplaceApplicationError as exc:
+            raise AgentPatchGenerationError(exc.failure_code, str(exc)) from exc
+
+        patch_diff = build_unified_diff(
+            path=path,
+            before=original_contents[path],
+            after=updated_contents[path],
+        )
+        if not patch_diff.strip():
+            raise AgentPatchGenerationError(
+                "schema_invalid",
+                "Structured edit intent did not produce any file changes",
+            )
+        return patch_diff
+
+    def _repo_context_file_contents_for_targets(
+        self,
+        session: AgentSession,
+        target_files: tuple[str, ...],
+    ) -> dict[str, str]:
+        repo_context = session.repo_context
+        if repo_context is None:
+            raise AgentPatchValidationError("Patch generation requires repo_context with target file contents")
+
+        summaries_by_path = {item.path: item for item in repo_context.file_summaries}
+        missing_paths = [path for path in target_files if path not in summaries_by_path]
+        if missing_paths:
+            raise AgentPatchValidationError(
+                f"repo_context is missing target file summaries: {missing_paths!r}"
+            )
+
+        contents: dict[str, str] = {}
+        missing_content_paths: list[str] = []
+        for path in target_files:
+            content = summaries_by_path[path].content
+            if content is None:
+                missing_content_paths.append(path)
+                continue
+            contents[path] = content
+
+        if missing_content_paths:
+            raise AgentPatchValidationError(
+                f"repo_context is missing full target file contents: {missing_content_paths!r}"
+            )
+
+        return contents
 
     async def summarize_run(self, session: AgentSession) -> RunSummary:
         validate_session_basic_shape(session)
@@ -270,11 +450,83 @@ class LocalAgentCoreService(AgentCoreService):
             return None
         return session.failure_history[-1]
 
+    def _action_for_retryable_failure(
+        self,
+        session: AgentSession,
+        latest_failure: AgentFailure | None,
+    ) -> AgentAction | None:
+        if latest_failure is None or not latest_failure.retryable:
+            return None
+        if latest_failure.stage != "command":
+            return None
+
+        latest_action = session.action_history[-1] if session.action_history else None
+        if latest_action is None:
+            return None
+
+        if latest_action.type == AgentActionType.RUN_COMMAND:
+            target_files = self._repair_target_files(session, latest_action)
+            if not target_files:
+                return None
+            return ensure_action_id(
+                session,
+                AgentAction(
+                    type=AgentActionType.PROPOSE_PATCH,
+                    reason="Fix the issues found by the failed verification command",
+                    target_files=target_files,
+                    summary_text=latest_failure.message,
+                ),
+            )
+
+        if latest_action.type == AgentActionType.PROPOSE_PATCH:
+            failed_command = self._latest_command_action(session)
+            if failed_command is None or not failed_command.command_argv:
+                return None
+            return ensure_action_id(
+                session,
+                AgentAction(
+                    type=AgentActionType.RUN_COMMAND,
+                    reason="Re-run the failed verification command after applying a fix",
+                    step_id=failed_command.step_id,
+                    target_files=failed_command.target_files,
+                    command_argv=failed_command.command_argv,
+                    cwd=failed_command.cwd,
+                    summary_text=latest_failure.message,
+                ),
+            )
+
+        return None
+
     def _checks_passed(self, session: AgentSession) -> bool | None:
         commands_run = any(action.type == AgentActionType.RUN_COMMAND for action in session.action_history)
         if not commands_run:
             return None
         return not any(failure.stage == "command" for failure in session.failure_history)
+
+    def _repair_target_files(
+        self,
+        session: AgentSession,
+        failed_command: AgentAction,
+    ) -> tuple[str, ...]:
+        repo_context = session.repo_context
+        if repo_context is not None and repo_context.file_summaries:
+            paths = tuple(item.path for item in repo_context.file_summaries if item.path)
+            if paths:
+                return paths
+
+        if failed_command.target_files:
+            return failed_command.target_files
+
+        if repo_context is not None and repo_context.dependency_hints:
+            return tuple(repo_context.dependency_hints)
+
+        return ()
+
+    def _latest_command_action(self, session: AgentSession) -> AgentAction | None:
+        for action in reversed(session.action_history):
+            if action.type == AgentActionType.RUN_COMMAND:
+                return action
+        return None
 
     def _final_status(self, session: AgentSession) -> str:
         plan = session.current_plan
@@ -325,7 +577,7 @@ class LocalAgentCoreService(AgentCoreService):
                 reason=step.description,
                 step_id=step.step_id,
                 target_files=step.target_files,
-                command_argv=self._command_for_step(step),
+                summary_text=step.rationale,
             ))
 
         if kind == "approval":
@@ -356,58 +608,6 @@ class LocalAgentCoreService(AgentCoreService):
             ))
 
         raise AgentStateValidationError(f"Unsupported plan step kind {kind!r}")
-
-    def _command_for_step(self, step: AgentStep) -> tuple[str, ...]:
-        explicit_command = self._explicit_command_hint(step)
-        if explicit_command:
-            return explicit_command
-
-        lowered_text = " ".join(part.lower() for part in (step.description, step.rationale or ""))
-        if step.target_files and all(self._is_unittest_path(path) for path in step.target_files):
-            return (
-                "python",
-                "-m",
-                "unittest",
-                *(self._path_to_module(path) for path in step.target_files),
-            )
-
-        if step.target_files and "check" in lowered_text and all(
-            path.endswith(".py") for path in step.target_files
-        ):
-            return ("python", "-m", "py_compile", *step.target_files)
-
-        if "test" in lowered_text or "unittest" in lowered_text:
-            return ("python", "-m", "unittest")
-
-        raise AgentStateValidationError(
-            "Command plan steps must provide test targets, python files for checks, or an explicit command hint"
-        )
-
-    def _explicit_command_hint(self, step: AgentStep) -> tuple[str, ...]:
-        for field in (step.rationale, step.description):
-            if not field:
-                continue
-
-            marker_index = field.lower().find("command:")
-            if marker_index != -1:
-                command_text = field[marker_index + len("command:") :].strip()
-                if not command_text:
-                    raise AgentStateValidationError("Command hint after 'command:' may not be empty")
-                return tuple(shlex.split(command_text))
-
-            fenced_match = self._COMMAND_HINT_RE.search(field)
-            if fenced_match:
-                return tuple(shlex.split(fenced_match.group(1)))
-
-        return ()
-
-    def _is_unittest_path(self, path: str) -> bool:
-        return path.startswith("tests/") and path.endswith(".py")
-
-    def _path_to_module(self, path: str) -> str:
-        if not path.endswith(".py"):
-            raise AgentStateValidationError(f"Expected a Python test module path, got {path!r}")
-        return path[:-3].replace("/", ".")
 
     def _normalize_plan_step_ids(self, plan: AgentPlan | None) -> AgentPlan | None:
         if plan is None:

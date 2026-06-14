@@ -163,6 +163,7 @@ class FileSummary(SerializableModel):
     path: str
     summary: str | None = None
     language: str | None = None
+    content: str | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

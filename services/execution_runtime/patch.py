@@ -137,50 +137,7 @@ class LocalPatchApplier:
             ) from exc
 
     def _apply_file_patch(self, file_patch: _FilePatch, current_text: str) -> str | None:
-        current_lines = current_text.splitlines(keepends=True)
-        updated_lines: list[str] = []
-        cursor = 0
-
-        for hunk in file_patch.hunks:
-            start_index = max(hunk.old_start - 1, 0)
-            if start_index < cursor or start_index > len(current_lines):
-                raise ErrorCodeContractError(
-                    ErrorCode.PATCH_CONFLICT,
-                    f"Patch hunk position is invalid for {self._target_path_for_patch(file_patch)}.",
-                )
-
-            updated_lines.extend(current_lines[cursor:start_index])
-            line_index = start_index
-            for entry in hunk.lines:
-                if entry.prefix == " ":
-                    line_index = self._match_existing_line(
-                        current_lines,
-                        line_index,
-                        entry.text,
-                        file_patch,
-                    )
-                    updated_lines.append(current_lines[line_index - 1])
-                elif entry.prefix == "-":
-                    line_index = self._match_existing_line(
-                        current_lines,
-                        line_index,
-                        entry.text,
-                        file_patch,
-                    )
-                elif entry.prefix == "+":
-                    updated_lines.append(entry.text + ("" if entry.no_newline else "\n"))
-                else:
-                    raise ErrorCodeContractError(
-                        ErrorCode.PATCH_MALFORMED,
-                        f"Unsupported diff line prefix {entry.prefix!r}.",
-                    )
-            cursor = line_index
-
-        updated_lines.extend(current_lines[cursor:])
-        updated_text = "".join(updated_lines)
-        if file_patch.new_path == "/dev/null":
-            return None
-        return updated_text
+        return apply_file_patch_to_text(file_patch, current_text)
 
     def _match_existing_line(
         self,
@@ -229,71 +186,7 @@ class LocalPatchApplier:
             raise
 
     def _parse_unified_diff(self, unified_diff: str) -> tuple[_FilePatch, ...]:
-        lines = unified_diff.splitlines()
-        file_patches: list[_FilePatch] = []
-        index = 0
-
-        while index < len(lines):
-            line = lines[index]
-            if not line.startswith("--- "):
-                index += 1
-                continue
-            if index + 1 >= len(lines) or not lines[index + 1].startswith("+++ "):
-                raise ErrorCodeContractError(
-                    ErrorCode.PATCH_MALFORMED,
-                    "Unified diff is missing a +++ header after ---.",
-                )
-
-            old_path = self._normalize_patch_path(lines[index][4:])
-            new_path = self._normalize_patch_path(lines[index + 1][4:])
-            index += 2
-            hunks: list[_Hunk] = []
-
-            while index < len(lines) and lines[index].startswith("@@ "):
-                hunk_header = lines[index]
-                match = _HUNK_HEADER_RE.match(hunk_header)
-                if match is None:
-                    raise ErrorCodeContractError(
-                        ErrorCode.PATCH_MALFORMED,
-                        f"Invalid hunk header: {hunk_header}",
-                    )
-                index += 1
-                hunk_lines: list[_DiffLine] = []
-                while index < len(lines):
-                    hunk_line = lines[index]
-                    if hunk_line.startswith(("--- ", "@@ ")):
-                        break
-                    if hunk_line == r"\ No newline at end of file":
-                        if not hunk_lines:
-                            raise ErrorCodeContractError(
-                                ErrorCode.PATCH_MALFORMED,
-                                "Unexpected no-newline marker in diff.",
-                            )
-                        previous = hunk_lines[-1]
-                        hunk_lines[-1] = _DiffLine(previous.prefix, previous.text, True)
-                        index += 1
-                        continue
-                    if not hunk_line or hunk_line[0] not in {" ", "+", "-"}:
-                        raise ErrorCodeContractError(
-                            ErrorCode.PATCH_MALFORMED,
-                            f"Unsupported diff content line: {hunk_line}",
-                        )
-                    hunk_lines.append(_DiffLine(hunk_line[0], hunk_line[1:]))
-                    index += 1
-
-                hunks.append(
-                    _Hunk(
-                        old_start=int(match.group("old_start")),
-                        old_count=int(match.group("old_count") or "1"),
-                        new_start=int(match.group("new_start")),
-                        new_count=int(match.group("new_count") or "1"),
-                        lines=tuple(hunk_lines),
-                    )
-                )
-
-            file_patches.append(_FilePatch(old_path=old_path, new_path=new_path, hunks=tuple(hunks)))
-
-        return tuple(file_patches)
+        return parse_unified_diff(unified_diff)
 
     def _normalize_patch_path(self, raw_path: str) -> str:
         path = raw_path.split("\t", 1)[0].strip()
@@ -309,4 +202,182 @@ class LocalPatchApplier:
         return file_patch.old_path
 
 
-__all__ = ["LocalPatchApplier"]
+__all__ = [
+    "LocalPatchApplier",
+    "apply_file_patch_to_text",
+    "parse_unified_diff",
+    "validate_hunk_line_counts",
+]
+
+
+def parse_unified_diff(unified_diff: str) -> tuple[_FilePatch, ...]:
+    lines = unified_diff.splitlines()
+    file_patches: list[_FilePatch] = []
+    index = 0
+
+    while index < len(lines):
+        line = lines[index]
+        if not line.startswith("--- "):
+            index += 1
+            continue
+        if index + 1 >= len(lines) or not lines[index + 1].startswith("+++ "):
+            raise ErrorCodeContractError(
+                ErrorCode.PATCH_MALFORMED,
+                "Unified diff is missing a +++ header after ---.",
+            )
+
+        old_path = _normalize_patch_path(lines[index][4:])
+        new_path = _normalize_patch_path(lines[index + 1][4:])
+        index += 2
+        hunks: list[_Hunk] = []
+
+        while index < len(lines) and lines[index].startswith("@@ "):
+            hunk_header = lines[index]
+            match = _HUNK_HEADER_RE.match(hunk_header)
+            if match is None:
+                raise ErrorCodeContractError(
+                    ErrorCode.PATCH_MALFORMED,
+                    f"Invalid hunk header: {hunk_header}",
+                )
+            index += 1
+            hunk_lines: list[_DiffLine] = []
+            while index < len(lines):
+                hunk_line = lines[index]
+                if hunk_line.startswith(("--- ", "@@ ")):
+                    break
+                if hunk_line == r"\ No newline at end of file":
+                    if not hunk_lines:
+                        raise ErrorCodeContractError(
+                            ErrorCode.PATCH_MALFORMED,
+                            "Unexpected no-newline marker in diff.",
+                        )
+                    previous = hunk_lines[-1]
+                    hunk_lines[-1] = _DiffLine(previous.prefix, previous.text, True)
+                    index += 1
+                    continue
+                if not hunk_line or hunk_line[0] not in {" ", "+", "-"}:
+                    raise ErrorCodeContractError(
+                        ErrorCode.PATCH_MALFORMED,
+                        f"Unsupported diff content line: {hunk_line}",
+                    )
+                hunk_lines.append(_DiffLine(hunk_line[0], hunk_line[1:]))
+                index += 1
+
+            hunks.append(
+                _Hunk(
+                    old_start=int(match.group("old_start")),
+                    old_count=int(match.group("old_count") or "1"),
+                    new_start=int(match.group("new_start")),
+                    new_count=int(match.group("new_count") or "1"),
+                    lines=tuple(hunk_lines),
+                )
+            )
+
+        file_patches.append(_FilePatch(old_path=old_path, new_path=new_path, hunks=tuple(hunks)))
+
+    return tuple(file_patches)
+
+
+def apply_file_patch_to_text(file_patch: _FilePatch, current_text: str) -> str | None:
+    current_lines = current_text.splitlines(keepends=True)
+    updated_lines: list[str] = []
+    cursor = 0
+
+    for hunk in file_patch.hunks:
+        start_index = max(hunk.old_start - 1, 0)
+        if start_index < cursor or start_index > len(current_lines):
+            raise ErrorCodeContractError(
+                ErrorCode.PATCH_CONFLICT,
+                f"Patch hunk position is invalid for {_target_path_for_patch(file_patch)}.",
+            )
+
+        updated_lines.extend(current_lines[cursor:start_index])
+        line_index = start_index
+        for entry in hunk.lines:
+            if entry.prefix == " ":
+                line_index = _match_existing_line(
+                    current_lines,
+                    line_index,
+                    entry.text,
+                    file_patch,
+                )
+                updated_lines.append(current_lines[line_index - 1])
+            elif entry.prefix == "-":
+                line_index = _match_existing_line(
+                    current_lines,
+                    line_index,
+                    entry.text,
+                    file_patch,
+                )
+            elif entry.prefix == "+":
+                updated_lines.append(entry.text + ("" if entry.no_newline else "\n"))
+            else:
+                raise ErrorCodeContractError(
+                    ErrorCode.PATCH_MALFORMED,
+                    f"Unsupported diff line prefix {entry.prefix!r}.",
+                )
+        cursor = line_index
+
+    updated_lines.extend(current_lines[cursor:])
+    updated_text = "".join(updated_lines)
+    if file_patch.new_path == "/dev/null":
+        return None
+    return updated_text
+
+
+def validate_hunk_line_counts(file_patch: _FilePatch) -> None:
+    for hunk in file_patch.hunks:
+        old_count = sum(1 for line in hunk.lines if line.prefix in {" ", "-"})
+        new_count = sum(1 for line in hunk.lines if line.prefix in {" ", "+"})
+        if old_count != hunk.old_count:
+            raise ErrorCodeContractError(
+                ErrorCode.PATCH_MALFORMED,
+                f"Patch hunk old-count mismatch for {_target_path_for_patch(file_patch)}.",
+            )
+        if new_count != hunk.new_count:
+            raise ErrorCodeContractError(
+                ErrorCode.PATCH_MALFORMED,
+                f"Patch hunk new-count mismatch for {_target_path_for_patch(file_patch)}.",
+            )
+
+
+def _match_existing_line(
+    current_lines: list[str],
+    line_index: int,
+    expected_text: str,
+    file_patch: _FilePatch,
+) -> int:
+    if line_index >= len(current_lines):
+        raise ErrorCodeContractError(
+            ErrorCode.PATCH_CONFLICT,
+            f"Patch hunk exceeds file length for {_target_path_for_patch(file_patch)}.",
+        )
+
+    actual_text = current_lines[line_index]
+    normalized = actual_text[:-1] if actual_text.endswith("\n") else actual_text
+    if normalized != expected_text:
+        raise ErrorCodeContractError(
+            ErrorCode.PATCH_CONFLICT,
+            f"Patch hunk does not apply cleanly to {_target_path_for_patch(file_patch)}.",
+            details={
+                "expected": expected_text,
+                "actual": normalized,
+                "line_index": str(line_index + 1),
+            },
+        )
+    return line_index + 1
+
+
+def _normalize_patch_path(raw_path: str) -> str:
+    path = raw_path.split("\t", 1)[0].strip()
+    if path in {"/dev/null", ""}:
+        return path or "/dev/null"
+    if path.startswith("a/") or path.startswith("b/"):
+        return path[2:]
+    return path
+
+
+def _target_path_for_patch(file_patch: _FilePatch) -> str:
+    if file_patch.new_path != "/dev/null":
+        return file_patch.new_path
+    return file_patch.old_path

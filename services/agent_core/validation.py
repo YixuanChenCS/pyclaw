@@ -5,6 +5,12 @@ from pathlib import PurePosixPath
 from typing import Mapping, Sequence
 
 from packages.shared_types import TaskStatus
+from packages.shared_types import ErrorCodeContractError
+from services.execution_runtime.patch import (
+    apply_file_patch_to_text,
+    parse_unified_diff,
+    validate_hunk_line_counts,
+)
 
 from .models import AgentAction, AgentActionType, AgentSession, LoopGuardResult
 
@@ -12,6 +18,7 @@ VALID_PLAN_STEP_KINDS = frozenset(
     {"inspect", "patch", "command", "approval", "summarize", "complete"}
 )
 MAX_AGENT_PLAN_STEPS = 8
+MAX_PATCH_EDIT_BLOCKS = 16
 MAX_AGENT_ITERATIONS = 12
 MAX_REPEATED_ACTIONS = 3
 MAX_REPEATED_CONTEXT_REQUESTS = 3
@@ -26,6 +33,22 @@ class AgentCoreValidationError(ValueError):
 
 class AgentPlanValidationError(AgentCoreValidationError):
     """Raised when a model-produced plan is malformed or unsupported."""
+
+
+class AgentPatchValidationError(AgentCoreValidationError):
+    """Raised when a model-produced patch payload is malformed or unsupported."""
+
+
+class AgentPatchGenerationError(AgentPatchValidationError):
+    """Raised when structured patch intent cannot be converted into a deterministic patch."""
+
+    def __init__(self, failure_code: str, message: str) -> None:
+        super().__init__(message)
+        self.failure_code = failure_code
+
+
+class AgentCommandValidationError(AgentCoreValidationError):
+    """Raised when a model-produced command payload is malformed or unsupported."""
 
 
 class AgentStateValidationError(AgentCoreValidationError):
@@ -176,15 +199,34 @@ def extract_patch_changed_files(patch_diff: str) -> tuple[tuple[str, bool], ...]
 
 
 def validate_workspace_relative_path(path: str) -> None:
+    _validate_workspace_relative_path_with(
+        path,
+        error_type=AgentStateValidationError,
+        empty_message="Patch path may not be empty",
+        absolute_message=lambda value: f"Patch path must be workspace-relative: {value!r}",
+        escape_message=lambda value: f"Patch path may not escape the workspace: {value!r}",
+        home_message=lambda value: f"Patch path may not be home-relative: {value!r}",
+    )
+
+
+def _validate_workspace_relative_path_with(
+    path: str,
+    *,
+    error_type: type[AgentCoreValidationError],
+    empty_message: str,
+    absolute_message,
+    escape_message,
+    home_message,
+) -> None:
     if not path.strip():
-        raise AgentStateValidationError("Patch path may not be empty")
+        raise error_type(empty_message)
     pure_path = PurePosixPath(path)
     if pure_path.is_absolute():
-        raise AgentStateValidationError(f"Patch path must be workspace-relative: {path!r}")
+        raise error_type(absolute_message(path))
     if any(part == ".." for part in pure_path.parts):
-        raise AgentStateValidationError(f"Patch path may not escape the workspace: {path!r}")
+        raise error_type(escape_message(path))
     if path.startswith("~"):
-        raise AgentStateValidationError(f"Patch path may not be home-relative: {path!r}")
+        raise error_type(home_message(path))
 
 
 def evaluate_loop_guard(session: AgentSession) -> LoopGuardResult:
@@ -249,15 +291,124 @@ def evaluate_loop_guard(session: AgentSession) -> LoopGuardResult:
     return LoopGuardResult(triggered=False)
 
 
-def parse_json_object(text: str) -> Mapping[str, object]:
+def parse_json_object(
+    text: str,
+    *,
+    malformed_message: str = "Model returned malformed JSON",
+    object_message: str = "Response must be a JSON object",
+    error_type: type[AgentCoreValidationError] = AgentPlanValidationError,
+) -> Mapping[str, object]:
+    direct_error: json.JSONDecodeError | None = None
     try:
         payload = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise AgentPlanValidationError("Model returned malformed JSON") from exc
+        direct_error = exc
+    else:
+        if not isinstance(payload, dict):
+            raise error_type(object_message)
+        return payload
+
+    fenced_candidates = _extract_fenced_json_candidates(text)
+    if len(fenced_candidates) > 1:
+        raise error_type(f"{malformed_message}: multiple fenced JSON objects found")
+    if len(fenced_candidates) == 1:
+        return _parse_json_candidate(
+            fenced_candidates[0],
+            malformed_message=malformed_message,
+            object_message=object_message,
+            error_type=error_type,
+        )
+
+    top_level_candidates = _extract_top_level_json_objects(text)
+    if len(top_level_candidates) != 1:
+        detail = "no JSON object found" if not top_level_candidates else "multiple JSON objects found"
+        raise error_type(f"{malformed_message}: {detail}")
+    return _parse_json_candidate(
+        top_level_candidates[0],
+        malformed_message=malformed_message,
+        object_message=object_message,
+        error_type=error_type,
+        cause=direct_error,
+    )
+
+
+def _parse_json_candidate(
+    candidate: str,
+    *,
+    malformed_message: str,
+    object_message: str,
+    error_type: type[AgentCoreValidationError],
+    cause: Exception | None = None,
+) -> Mapping[str, object]:
+    try:
+        payload = json.loads(candidate)
+    except json.JSONDecodeError as exc:
+        raise error_type(malformed_message) from (cause or exc)
 
     if not isinstance(payload, dict):
-        raise AgentPlanValidationError("Plan response must be a JSON object")
+        raise error_type(object_message)
     return payload
+
+
+def _extract_fenced_json_candidates(text: str) -> list[str]:
+    candidates: list[str] = []
+    lines = text.splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index].strip().lower()
+        if not line.startswith("```json"):
+            index += 1
+            continue
+        block_lines: list[str] = []
+        index += 1
+        while index < len(lines) and not lines[index].strip().startswith("```"):
+            block_lines.append(lines[index])
+            index += 1
+        if index >= len(lines):
+            break
+        candidates.append("\n".join(block_lines).strip())
+        index += 1
+    return [candidate for candidate in candidates if candidate]
+
+
+def _extract_top_level_json_objects(text: str) -> list[str]:
+    candidates: list[str] = []
+    start_index: int | None = None
+    depth = 0
+    in_string = False
+    escaped = False
+
+    for index, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+                continue
+            if char == "\\":
+                escaped = True
+                continue
+            if char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+            continue
+
+        if char == "{":
+            if depth == 0:
+                start_index = index
+            depth += 1
+            continue
+
+        if char == "}":
+            if depth == 0:
+                continue
+            depth -= 1
+            if depth == 0 and start_index is not None:
+                candidates.append(text[start_index : index + 1].strip())
+                start_index = None
+
+    return candidates
 
 
 def validate_plan_payload(payload: Mapping[str, object]) -> dict[str, object]:
@@ -348,6 +499,76 @@ def validate_plan_payload(payload: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def validate_patch_payload(payload: Mapping[str, object]) -> dict[str, object]:
+    return validate_patch_intent_payload(payload)
+
+
+def validate_patch_intent_payload(
+    payload: Mapping[str, object],
+    *,
+    allowed_paths: Sequence[str] = (),
+) -> dict[str, str]:
+    path_value = payload.get("path")
+    if not isinstance(path_value, str) or not path_value.strip():
+        raise AgentPatchValidationError("Patch response path must be a non-empty string")
+
+    search_value = payload.get("search")
+    if not isinstance(search_value, str):
+        raise AgentPatchValidationError("Patch response search must be a string")
+
+    replace_value = payload.get("replace")
+    if not isinstance(replace_value, str):
+        raise AgentPatchValidationError("Patch response replace must be a string")
+
+    path = path_value.strip()
+    _validate_workspace_relative_path_with(
+        path,
+        error_type=AgentPatchValidationError,
+        empty_message="Patch response path must be a non-empty string",
+        absolute_message=lambda value: f"Patch response path must be workspace-relative: {value!r}",
+        escape_message=lambda value: f"Patch response path may not escape the workspace: {value!r}",
+        home_message=lambda value: f"Patch response path may not be home-relative: {value!r}",
+    )
+
+    if allowed_paths and path not in allowed_paths:
+        raise AgentPatchValidationError(
+            f"Patch response path {path!r} must be one of the current action target files"
+        )
+
+    return {
+        "path": path,
+        "search": search_value,
+        "replace": replace_value,
+    }
+
+
+def validate_command_payload(payload: Mapping[str, object]) -> dict[str, object]:
+    command_argv_value = payload.get("command_argv")
+    if not isinstance(command_argv_value, list) or not command_argv_value:
+        raise AgentCommandValidationError("Command response command_argv must be a non-empty list")
+
+    normalized_argv: list[str] = []
+    for index, item in enumerate(command_argv_value, start=1):
+        if not isinstance(item, str) or not item.strip():
+            raise AgentCommandValidationError(
+                f"Command response command_argv[{index}] must be a non-empty string"
+            )
+        normalized_argv.append(item)
+
+    cwd_value = payload.get("cwd")
+    if cwd_value is None:
+        cwd = None
+    elif not isinstance(cwd_value, str) or not cwd_value.strip():
+        raise AgentCommandValidationError("Command response cwd must be a non-empty string when provided")
+    else:
+        cwd = cwd_value
+
+    return {
+        "command_argv": tuple(normalized_argv),
+        "cwd": cwd,
+    }
+
+
 def _normalize_patch_header_path(raw_path: str) -> str:
     path = raw_path.split("\t", 1)[0].strip()
     if path in {"/dev/null"}:
@@ -355,6 +576,54 @@ def _normalize_patch_header_path(raw_path: str) -> str:
     if path.startswith("a/") or path.startswith("b/"):
         return path[2:]
     return path
+
+
+def validate_patch_diff_against_session(
+    session: AgentSession,
+    action: AgentAction,
+) -> tuple[str, ...]:
+    patch_diff = action.patch_diff or ""
+    try:
+        file_patches = parse_unified_diff(patch_diff)
+    except ErrorCodeContractError as exc:
+        raise AgentStateValidationError(str(exc)) from exc
+
+    if not file_patches:
+        raise AgentStateValidationError("Patch diff must contain at least one file diff")
+
+    for file_patch in file_patches:
+        try:
+            validate_hunk_line_counts(file_patch)
+        except ErrorCodeContractError as exc:
+            raise AgentStateValidationError(str(exc)) from exc
+
+    changed_files = extract_patch_changed_files(patch_diff)
+    content_by_path = _repo_context_file_contents(session)
+    for file_patch in file_patches:
+        target_path = file_patch.new_path if file_patch.new_path != "/dev/null" else file_patch.old_path
+        if file_patch.old_path == "/dev/null":
+            current_text = ""
+        else:
+            current_text = content_by_path.get(target_path)
+            if current_text is None:
+                continue
+        try:
+            apply_file_patch_to_text(file_patch, current_text)
+        except ErrorCodeContractError as exc:
+            raise AgentStateValidationError(str(exc)) from exc
+
+    return tuple(path for path, _deleted in changed_files)
+
+
+def _repo_context_file_contents(session: AgentSession) -> dict[str, str]:
+    repo_context = session.repo_context
+    if repo_context is None:
+        return {}
+    return {
+        item.path: item.content
+        for item in repo_context.file_summaries
+        if item.content is not None
+    }
 
 
 def _remaining_context_exhausted(session: AgentSession) -> bool:

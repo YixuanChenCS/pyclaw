@@ -40,7 +40,9 @@ class AgentSessionPhase(str, Enum):
 class AgentFailure(SerializableModel):
     stage: str
     message: str
+    code: str | None = None
     retryable: bool = False
+    details: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

@@ -80,12 +80,17 @@ def record_failure(
     *,
     stage: str,
     message: str,
+    code: str | None = None,
+    details: dict[str, str] | None = None,
     action: AgentAction | None = None,
 ) -> AgentSession:
     identified = ensure_action_id(session, action) if action is not None else None
     failed = replace(
         session,
-        failure_history=[*session.failure_history, AgentFailure(stage=stage, message=message)],
+        failure_history=[
+            *session.failure_history,
+            AgentFailure(stage=stage, message=message, code=code, details=dict(details or {})),
+        ],
     )
     if identified is None:
         return failed
@@ -100,6 +105,81 @@ def record_failure(
         pending_action=pending_action,
         pending_approval_id=None,
     )
+
+
+def record_retryable_failure(
+    session: AgentSession,
+    *,
+    stage: str,
+    message: str,
+    code: str,
+    details: dict[str, str] | None = None,
+) -> AgentSession:
+    return replace(
+        session,
+        failure_history=[
+            *session.failure_history,
+            AgentFailure(
+                stage=stage,
+                message=message,
+                code=code,
+                retryable=True,
+                details=dict(details or {}),
+            ),
+        ],
+    )
+
+
+def record_retryable_action_failure(
+    session: AgentSession,
+    *,
+    stage: str,
+    message: str,
+    code: str,
+    action: AgentAction,
+    details: dict[str, str] | None = None,
+    repo_context: RepoContextResult | None = None,
+) -> AgentSession:
+    identified = ensure_action_id(session, action)
+    pending_action = session.pending_action
+    if _pending_matches(session, identified):
+        pending_action = None
+
+    return replace(
+        session,
+        phase=AgentSessionPhase.READY,
+        repo_context=repo_context or session.repo_context,
+        pending_action=pending_action,
+        pending_approval_id=None,
+        failure_history=[
+            *session.failure_history,
+            AgentFailure(
+                stage=stage,
+                message=message,
+                code=code,
+                retryable=True,
+                details=dict(details or {}),
+            ),
+        ],
+    )
+
+
+def clear_retryable_failures(
+    session: AgentSession,
+    *,
+    stage: str | None = None,
+) -> AgentSession:
+    retained = [
+        failure
+        for failure in session.failure_history
+        if not (
+            failure.retryable
+            and (stage is None or failure.stage == stage)
+        )
+    ]
+    if len(retained) == len(session.failure_history):
+        return session
+    return replace(session, failure_history=retained)
 
 
 def set_pending_approval(
