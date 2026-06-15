@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 import tempfile
@@ -19,8 +20,17 @@ from apps.cli import (
     create_local_cli_application_from_env,
     resolve_local_cli_runner_config,
 )
-from packages.shared_types import FileSummary, RepoContextResult, RunRequest, Session, Workspace, new_run_id
-from services.agent_core import AgentCoreCoordinator, AgentCoreModelConfig, LocalAgentRunnerConfig
+from packages.shared_types import (
+    ApprovalDecision,
+    FileSummary,
+    RepoContextResult,
+    RunRequest,
+    RunStatus,
+    Session,
+    Workspace,
+    new_run_id,
+)
+from services.agent_core import AgentAction, AgentActionType, AgentCoreCoordinator, AgentCoreModelConfig, LocalAgentRunnerConfig
 from services.agent_core import FakeModelClient, LocalAgentCoreService
 from services.execution_runtime import LocalExecutionRuntimeService, SQLiteExecutionRuntimeRepository
 
@@ -61,6 +71,14 @@ class _RepoStore:
         if str(workspace_id) == str(self._workspace.workspace_id):
             return self._workspace
         return None
+
+
+class _ApprovalCoordinator:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def resume_after_approval(self, run_id, *, approved, reviewer=None, comment=None):
+        self.calls.append((run_id, approved, reviewer, comment))
 
 
 class _PatchRepoIntelligence:
@@ -182,6 +200,143 @@ class TestAppEntrypoints(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(loaded)
         self.assertEqual(str(loaded.run_id), str(run_id))
         self.assertEqual(loaded.status.value, "queued")
+
+    async def test_platform_api_list_runs_filters_by_session_and_status(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            workspace = Workspace(root_path=tmpdir)
+            first_session = Session(workspace_id=workspace.workspace_id)
+            second_session = Session(workspace_id=workspace.workspace_id)
+            repository = SQLiteExecutionRuntimeRepository(root / "runtime.sqlite3")
+            runtime = LocalExecutionRuntimeService(repository=repository, repo_store=_RepoStore(workspace))
+            first_run_id = await runtime.enqueue_run(
+                RunRequest(
+                    workspace_id=workspace.workspace_id,
+                    session_id=first_session.session_id,
+                    prompt="First",
+                )
+            )
+            await runtime.enqueue_run(
+                RunRequest(
+                    workspace_id=workspace.workspace_id,
+                    session_id=second_session.session_id,
+                    prompt="Second",
+                )
+            )
+            await repository.update_run_status(first_run_id, RunStatus.CANCELLED)
+            api = create_platform_api(
+                agent_core=LocalAgentCoreService(),
+                execution_runtime=runtime,
+                repo_intelligence=_RepoIntelligence(),
+                observability=_Observability(),
+            )
+
+            runs = await api.list_runs(
+                str(workspace.workspace_id),
+                session_id=str(first_session.session_id),
+                status=RunStatus.CANCELLED,
+            )
+
+        self.assertEqual([str(run.run_id) for run in runs], [first_run_id])
+
+    async def test_platform_api_stream_replays_after_last_event_uuid(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            workspace = Workspace(root_path=tmpdir)
+            session = Session(workspace_id=workspace.workspace_id)
+            repository = SQLiteExecutionRuntimeRepository(root / "runtime.sqlite3")
+            runtime = LocalExecutionRuntimeService(
+                repository=repository,
+                repo_store=_RepoStore(workspace),
+                stream_poll_interval=0.01,
+            )
+            run_id = await runtime.enqueue_run(
+                RunRequest(
+                    workspace_id=workspace.workspace_id,
+                    session_id=session.session_id,
+                    prompt="Stream",
+                )
+            )
+            events = await repository.list_events(run_id)
+            api = create_platform_api(
+                agent_core=LocalAgentCoreService(),
+                execution_runtime=runtime,
+                repo_intelligence=_RepoIntelligence(),
+                observability=_Observability(),
+            )
+
+            stream = api.stream_run_events(run_id, last_event_id=str(events[0].event_id))
+            replayed = await asyncio.wait_for(anext(stream), timeout=1)
+            await stream.aclose()
+
+        self.assertEqual(replayed.sequence, 2)
+
+    async def test_platform_api_submit_approval_resumes_through_coordinator(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            workspace = Workspace(root_path=tmpdir)
+            session = Session(workspace_id=workspace.workspace_id)
+            repository = SQLiteExecutionRuntimeRepository(root / "runtime.sqlite3")
+            runtime = LocalExecutionRuntimeService(repository=repository, repo_store=_RepoStore(workspace))
+            run_id = await runtime.enqueue_run(
+                RunRequest(
+                    workspace_id=workspace.workspace_id,
+                    session_id=session.session_id,
+                    prompt="Approve",
+                )
+            )
+            approval_id = "approval_test"
+            agent_core = LocalAgentCoreService()
+            await repository.save_agent_session(
+                agent_core.create_session(
+                    run_id=run_id,
+                    workspace_id=workspace.workspace_id,
+                    user_request="Approve",
+                    pending_action=AgentAction(
+                        type=AgentActionType.REQUEST_APPROVAL,
+                        reason="Approve",
+                    ),
+                    pending_approval_id=approval_id,
+                )
+            )
+            coordinator = _ApprovalCoordinator()
+            api = create_platform_api(
+                agent_core=agent_core,
+                execution_runtime=runtime,
+                repo_intelligence=_RepoIntelligence(),
+                observability=_Observability(),
+                coordinator=coordinator,
+            )
+
+            await api.submit_approval(
+                ApprovalDecision(
+                    approval_id=approval_id,
+                    run_id=run_id,
+                    approved=True,
+                    reviewer="api-user",
+                )
+            )
+
+        self.assertEqual(coordinator.calls, [(run_id, True, "api-user", None)])
+
+    async def test_platform_api_health_aggregates_runtime_health(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            runtime = LocalExecutionRuntimeService(
+                repository=SQLiteExecutionRuntimeRepository(Path(tmpdir) / "runtime.sqlite3"),
+                repo_store=_RepoStore(workspace),
+            )
+            api = create_platform_api(
+                agent_core=LocalAgentCoreService(),
+                execution_runtime=runtime,
+                repo_intelligence=_RepoIntelligence(),
+                observability=_Observability(),
+            )
+
+            health = await api.get_health()
+
+        self.assertEqual(health.status, "ready")
+        self.assertEqual(health.details["runtime"]["details"]["db"], "ready")
 
     async def test_local_cli_factory_uses_bootstrap_stack(self):
         # Verifies that the local CLI factory goes through the env-based bootstrap path instead of manual ad-hoc service construction.

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 import re
 from typing import AsyncIterator, Sequence
 
+from packages.provider_adapters import DeploymentAdapter
 from packages.shared_types import (
     ApprovalDecision,
     ApprovalRequest,
@@ -19,6 +21,7 @@ from packages.shared_types import (
     ErrorCode,
     ErrorCodeContractError,
     EventType,
+    HealthCheckResult,
     InvalidRunStateError,
     LockLease,
     PatchProposal,
@@ -59,6 +62,7 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
         repository: SQLiteExecutionRuntimeRepository | None = None,
         repo_store: RepoStore | None = None,
         workspace_lock_manager: WorkspaceLockManager | None = None,
+        deployment_adapter: DeploymentAdapter | None = None,
         db_path: str | Path | None = None,
         stream_poll_interval: float = 0.05,
     ) -> None:
@@ -68,6 +72,7 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
         self._repository = repository
         self._repo_store = repo_store
         self._workspace_lock_manager = workspace_lock_manager
+        self._deployment_adapter = deployment_adapter
         self._stream_poll_interval = stream_poll_interval
         self._startup_lock = asyncio.Lock()
         self._started = False
@@ -87,12 +92,13 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
             session_id=request.session_id,
             prompt=request.prompt,
         )
-        await self._repository.create_run(
+        await self._repository.create_run_idempotent(
             run,
             events=(
                 build_run_status_event(run, EventType.RUN_CREATED),
                 build_run_status_event(run, EventType.RUN_QUEUED),
             ),
+            request_fingerprint=json.dumps(request.to_dict(), sort_keys=True),
         )
         return str(run.run_id)
 
@@ -148,10 +154,36 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
         await self._finalize_run_cancellation(run_id, reason=reason)
         await self._release_workspace_lock(run_id)
 
-    async def stream_events(self, run_id: str) -> AsyncIterator[RunEvent]:
+    async def stream_events(
+        self,
+        run_id: str,
+        *,
+        after_sequence: int = 0,
+    ) -> AsyncIterator[RunEvent]:
         await self._ensure_started()
-        current_sequence = 0
+        if after_sequence < 0:
+            raise ErrorCodeContractError(
+                ErrorCode.INVALID_REQUEST,
+                "after_sequence must be non-negative.",
+                details={"after_sequence": str(after_sequence)},
+            )
+        current_sequence = after_sequence
         typed_run_id = RunId(run_id)
+        run = await self._repository.get_run(typed_run_id)
+        if run is None:
+            raise EntityNotFoundError("run", run_id)
+        if after_sequence > 0 and not await self._repository.event_sequence_exists(
+            typed_run_id,
+            after_sequence,
+        ):
+            raise ErrorCodeContractError(
+                ErrorCode.EVENT_REPLAY_GAP,
+                f"Event checkpoint does not exist for run {run_id}: {after_sequence}",
+                details={
+                    "run_id": run_id,
+                    "after_sequence": str(after_sequence),
+                },
+            )
         while True:
             events = await self._repository.list_events(typed_run_id, after_sequence=current_sequence)
             for event in events:
@@ -460,7 +492,38 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
         return recovery
 
     async def attach_artifacts(self, run_id: str, artifacts: Sequence[ArtifactRef]) -> None:
-        raise NotImplementedError("Phase 1 does not implement artifact persistence.")
+        await self._ensure_started()
+        run = await self._repository.get_run(run_id)
+        if run is None:
+            raise EntityNotFoundError("run", run_id)
+
+        existing_ids = {
+            str(artifact.artifact_id)
+            for artifact in await self._repository.list_artifacts(run_id)
+        }
+        for artifact_ref in artifacts:
+            if str(artifact_ref.run_id) != run_id:
+                raise ErrorCodeContractError(
+                    ErrorCode.INVALID_REQUEST,
+                    "Attached artifact run_id must match the target run.",
+                    details={
+                        "run_id": run_id,
+                        "artifact_run_id": str(artifact_ref.run_id),
+                    },
+                )
+            if str(artifact_ref.artifact_id) in existing_ids:
+                continue
+            artifact = Artifact(
+                artifact_id=artifact_ref.artifact_id,
+                run_id=artifact_ref.run_id,
+                task_id=artifact_ref.task_id,
+                artifact_type=artifact_ref.artifact_type,
+                label=artifact_ref.label,
+                uri=artifact_ref.uri,
+                created_at=artifact_ref.created_at,
+            )
+            await self._repository.create_artifact(artifact)
+            existing_ids.add(str(artifact.artifact_id))
 
     async def finalize_run(self, run_id: str, result: RunResult) -> None:
         await self._ensure_started()
@@ -526,7 +589,84 @@ class LocalExecutionRuntimeService(ExecutionRuntimeService):
         )
 
     async def deploy(self, request: DeploymentRequest) -> DeploymentResult:
-        raise NotImplementedError("Phase 1 does not implement deployment.")
+        await self._ensure_started()
+        run = await self._repository.get_run(request.run_id)
+        if run is None:
+            raise EntityNotFoundError("run", str(request.run_id))
+        if run.workspace_id != request.workspace_id:
+            raise ErrorCodeContractError(
+                ErrorCode.INVALID_REQUEST,
+                "Deployment workspace_id must match the persisted run.",
+                details={
+                    "run_id": str(run.run_id),
+                    "workspace_id": str(request.workspace_id),
+                },
+            )
+        if run.status != RunStatus.SUCCEEDED:
+            raise InvalidRunStateError(
+                f"Cannot deploy run {run.run_id} in status {run.status.value}"
+            )
+        if not request.target.strip():
+            raise ErrorCodeContractError(
+                ErrorCode.INVALID_REQUEST,
+                "Deployment target must be non-empty.",
+            )
+        if self._deployment_adapter is None:
+            raise ErrorCodeContractError(
+                ErrorCode.DEPLOYMENT_UNAVAILABLE,
+                "No deployment adapter is configured.",
+                details={"run_id": str(run.run_id), "target": request.target},
+            )
+
+        try:
+            result = await self._deployment_adapter.deploy(request)
+        except ErrorCodeContractError:
+            raise
+        except Exception as exc:
+            raise ErrorCodeContractError(
+                ErrorCode.DEPLOYMENT_FAILED,
+                f"Deployment failed: {exc}",
+                details={"run_id": str(run.run_id), "target": request.target},
+            ) from exc
+        if result.run_id != request.run_id:
+            raise ErrorCodeContractError(
+                ErrorCode.DEPLOYMENT_FAILED,
+                "Deployment adapter returned a result for a different run.",
+                details={
+                    "run_id": str(request.run_id),
+                    "result_run_id": str(result.run_id),
+                },
+            )
+        return result
+
+    async def get_health(self) -> HealthCheckResult:
+        try:
+            snapshot = await self._repository.get_health_snapshot()
+        except Exception as exc:
+            return HealthCheckResult(
+                service="execution-runtime",
+                status="not_ready",
+                details={"db": "not_ready", "error": str(exc)},
+            )
+
+        details = dict(snapshot)
+        details["runtime"] = "ready"
+        details["locks"] = (
+            {
+                "status": "ready",
+                "active_leases": len(self._workspace_leases),
+            }
+            if self._workspace_lock_manager is not None
+            else {"status": "disabled", "active_leases": 0}
+        )
+        details["deployment"] = (
+            "ready" if self._deployment_adapter is not None else "not_configured"
+        )
+        return HealthCheckResult(
+            service="execution-runtime",
+            status="ready",
+            details=details,
+        )
 
     async def _ensure_started(self) -> None:
         if self._started:

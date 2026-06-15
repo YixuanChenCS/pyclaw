@@ -10,6 +10,7 @@ from packages.shared_types import (
     CommandResult,
     DeploymentRequest,
     DeploymentResult,
+    HealthCheckResult,
     PatchProposal,
     RecoveryStatus,
     RunEvent,
@@ -30,8 +31,13 @@ class ExecutionRuntimeService(ABC):
         """Cancel a queued or active run."""
 
     @abstractmethod
-    async def stream_events(self, run_id: str) -> AsyncIterator[RunEvent]:
-        """Yield durable events for a run."""
+    async def stream_events(
+        self,
+        run_id: str,
+        *,
+        after_sequence: int = 0,
+    ) -> AsyncIterator[RunEvent]:
+        """Yield durable events for a run after the supplied checkpoint."""
 
     @abstractmethod
     async def execute_command(self, request: CommandRequest) -> CommandResult:
@@ -64,3 +70,7 @@ class ExecutionRuntimeService(ABC):
     @abstractmethod
     async def deploy(self, request: DeploymentRequest) -> DeploymentResult:
         """Run the deployment workflow for a completed run."""
+
+    @abstractmethod
+    async def get_health(self) -> HealthCheckResult:
+        """Return runtime, persistence, queue, lock, and artifact-store readiness."""

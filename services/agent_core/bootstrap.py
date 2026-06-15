@@ -9,6 +9,7 @@ from typing import Any, Mapping, Sequence
 import yaml
 
 from packages.provider_adapters import LiteLLMProvider
+from packages.provider_adapters import DeploymentAdapter
 from packages.shared_types import RepoStore
 from services.execution_runtime import LocalExecutionRuntimeService, SQLiteExecutionRuntimeRepository
 from services.repo_intelligence.service import RepoIntelligenceService
@@ -207,6 +208,7 @@ def build_local_agent_runner_stack(
     config: LocalAgentRunnerConfig,
     repo_store: RepoStore,
     repo_intelligence: RepoIntelligenceService | None = None,
+    deployment_adapter: DeploymentAdapter | None = None,
 ) -> LocalAgentRunnerStack:
     _apply_provider_api_keys(config.api_keys)
     repository = SQLiteExecutionRuntimeRepository(Path(config.runtime_db_path))
@@ -219,6 +221,7 @@ def build_local_agent_runner_stack(
     execution_runtime = LocalExecutionRuntimeService(
         repository=repository,
         repo_store=repo_store,
+        deployment_adapter=deployment_adapter,
         stream_poll_interval=config.stream_poll_interval,
     )
     coordinator = AgentCoreCoordinator(
@@ -242,10 +245,12 @@ def build_local_agent_runner_stack_from_env(
     *,
     repo_store: RepoStore,
     env: Mapping[str, str] | None = None,
+    deployment_adapter: DeploymentAdapter | None = None,
 ) -> LocalAgentRunnerStack:
     return build_local_agent_runner_stack(
         config=load_local_agent_runner_config_from_env(env),
         repo_store=repo_store,
+        deployment_adapter=deployment_adapter,
     )
 
 

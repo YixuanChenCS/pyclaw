@@ -16,6 +16,8 @@ from packages.shared_types import (
     ArtifactId,
     ArtifactType,
     EntityNotFoundError,
+    ErrorCode,
+    ErrorCodeContractError,
     EventId,
     EventType,
     JSONValue,
@@ -74,12 +76,46 @@ class SQLiteExecutionRuntimeRepository:
     ) -> tuple[RunEvent, ...]:
         return await asyncio.to_thread(self._create_run_sync, run, tuple(events))
 
+    async def create_run_idempotent(
+        self,
+        run: Run,
+        *,
+        events: Sequence[RunEvent] = (),
+        request_fingerprint: str,
+    ) -> bool:
+        """Create a run once, returning False when the same request already exists."""
+        return await asyncio.to_thread(
+            self._create_run_idempotent_sync,
+            run,
+            tuple(events),
+            request_fingerprint,
+        )
+
     async def get_run(self, run_id: RunId | str) -> Run | None:
         return await asyncio.to_thread(self._get_run_sync, RunId(str(run_id)))
 
-    async def list_runs(self, workspace_id: WorkspaceId | str | None = None) -> tuple[Run, ...]:
+    async def list_runs(
+        self,
+        workspace_id: WorkspaceId | str | None = None,
+        *,
+        session_id: SessionId | str | None = None,
+        status: RunStatus | str | None = None,
+    ) -> tuple[Run, ...]:
         typed_workspace_id = None if workspace_id is None else WorkspaceId(str(workspace_id))
-        return await asyncio.to_thread(self._list_runs_sync, typed_workspace_id)
+        typed_session_id = None if session_id is None else SessionId(str(session_id))
+        typed_status = (
+            None
+            if status is None
+            else status
+            if isinstance(status, RunStatus)
+            else RunStatus(status)
+        )
+        return await asyncio.to_thread(
+            self._list_runs_sync,
+            typed_workspace_id,
+            typed_session_id,
+            typed_status,
+        )
 
     async def update_run_status(
         self,
@@ -123,6 +159,31 @@ class SQLiteExecutionRuntimeRepository:
             RunId(str(run_id)),
             after_sequence,
         )
+
+    async def get_event_sequence(
+        self,
+        run_id: RunId | str,
+        event_id: EventId | str,
+    ) -> int | None:
+        return await asyncio.to_thread(
+            self._get_event_sequence_sync,
+            RunId(str(run_id)),
+            EventId(str(event_id)),
+        )
+
+    async def event_sequence_exists(
+        self,
+        run_id: RunId | str,
+        sequence: int,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self._event_sequence_exists_sync,
+            RunId(str(run_id)),
+            sequence,
+        )
+
+    async def get_health_snapshot(self) -> dict[str, object]:
+        return await asyncio.to_thread(self._get_health_snapshot_sync)
 
     async def claim_next_run(
         self,
@@ -255,6 +316,12 @@ class SQLiteExecutionRuntimeRepository:
                     FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
                 );
 
+                CREATE TABLE IF NOT EXISTS run_idempotency (
+                    run_id TEXT PRIMARY KEY,
+                    request_fingerprint TEXT NOT NULL,
+                    FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+                );
+
                 CREATE TABLE IF NOT EXISTS artifacts (
                     artifact_id TEXT PRIMARY KEY,
                     run_id TEXT NOT NULL,
@@ -371,6 +438,96 @@ class SQLiteExecutionRuntimeRepository:
                 self._append_event_with_sequence_in_tx(connection, run.run_id, event)
                 for event in events
             )
+
+    def _create_run_idempotent_sync(
+        self,
+        run: Run,
+        events: Sequence[RunEvent],
+        request_fingerprint: str,
+    ) -> bool:
+        with self._transaction("IMMEDIATE") as connection:
+            row = connection.execute(
+                "SELECT * FROM runs WHERE run_id = ?",
+                (str(run.run_id),),
+            ).fetchone()
+            if row is not None:
+                existing = self._run_from_row(row)
+                fingerprint_row = connection.execute(
+                    "SELECT request_fingerprint FROM run_idempotency WHERE run_id = ?",
+                    (str(run.run_id),),
+                ).fetchone()
+                if fingerprint_row is not None:
+                    if fingerprint_row["request_fingerprint"] == request_fingerprint:
+                        return False
+                    raise ErrorCodeContractError(
+                        ErrorCode.INVALID_REQUEST,
+                        f"Run id {run.run_id} is already used by a different request.",
+                        details={"run_id": str(run.run_id)},
+                    )
+                if (
+                    existing.workspace_id == run.workspace_id
+                    and existing.session_id == run.session_id
+                    and existing.prompt == run.prompt
+                ):
+                    return False
+                raise ErrorCodeContractError(
+                    ErrorCode.INVALID_REQUEST,
+                    f"Run id {run.run_id} is already used by a different request.",
+                    details={"run_id": str(run.run_id)},
+                )
+
+            self._insert_run(connection, run)
+            connection.execute(
+                "INSERT INTO run_idempotency (run_id, request_fingerprint) VALUES (?, ?)",
+                (str(run.run_id), request_fingerprint),
+            )
+            for event in events:
+                self._append_event_with_sequence_in_tx(connection, run.run_id, event)
+            return True
+
+    def _get_event_sequence_sync(self, run_id: RunId, event_id: EventId) -> int | None:
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                "SELECT sequence FROM run_events WHERE run_id = ? AND event_id = ?",
+                (str(run_id), str(event_id)),
+            ).fetchone()
+        finally:
+            connection.close()
+        return None if row is None else int(row["sequence"])
+
+    def _event_sequence_exists_sync(self, run_id: RunId, sequence: int) -> bool:
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                "SELECT 1 FROM run_events WHERE run_id = ? AND sequence = ?",
+                (str(run_id), sequence),
+            ).fetchone()
+        finally:
+            connection.close()
+        return row is not None
+
+    def _get_health_snapshot_sync(self) -> dict[str, object]:
+        connection = self._connect()
+        try:
+            connection.execute("SELECT 1").fetchone()
+            status_rows = connection.execute(
+                "SELECT status, COUNT(*) AS count FROM runs GROUP BY status"
+            ).fetchall()
+            artifact_count = connection.execute(
+                "SELECT COUNT(*) AS count FROM artifacts"
+            ).fetchone()
+        finally:
+            connection.close()
+        return {
+            "db": "ready",
+            "queue": {
+                str(row["status"]): int(row["count"])
+                for row in status_rows
+            },
+            "artifact_store": "ready",
+            "artifact_count": int(artifact_count["count"]),
+        }
 
     def _get_run_sync(self, run_id: RunId) -> Run | None:
         connection = self._connect()
@@ -757,25 +914,34 @@ class SQLiteExecutionRuntimeRepository:
             connection.close()
         return tuple(self._artifact_from_row(row) for row in rows)
 
-    def _list_runs_sync(self, workspace_id: WorkspaceId | None) -> tuple[Run, ...]:
+    def _list_runs_sync(
+        self,
+        workspace_id: WorkspaceId | None,
+        session_id: SessionId | None,
+        status: RunStatus | None,
+    ) -> tuple[Run, ...]:
         connection = self._connect()
         try:
-            if workspace_id is None:
-                rows = connection.execute(
-                    """
-                    SELECT * FROM runs
-                    ORDER BY created_at DESC, run_id DESC
-                    """
-                ).fetchall()
-            else:
-                rows = connection.execute(
-                    """
-                    SELECT * FROM runs
-                    WHERE workspace_id = ?
-                    ORDER BY created_at DESC, run_id DESC
-                    """,
-                    (str(workspace_id),),
-                ).fetchall()
+            clauses: list[str] = []
+            values: list[str] = []
+            if workspace_id is not None:
+                clauses.append("workspace_id = ?")
+                values.append(str(workspace_id))
+            if session_id is not None:
+                clauses.append("session_id = ?")
+                values.append(str(session_id))
+            if status is not None:
+                clauses.append("status = ?")
+                values.append(status.value)
+            where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+            rows = connection.execute(
+                f"""
+                SELECT * FROM runs
+                {where}
+                ORDER BY created_at DESC, run_id DESC
+                """,
+                tuple(values),
+            ).fetchall()
         finally:
             connection.close()
 
@@ -854,8 +1020,22 @@ class SQLiteExecutionRuntimeRepository:
                     and approval_row["comment"] == decision.comment
                 ):
                     return
-                raise ValueError(
-                    f"Approval {decision.approval_id} has already been decided and cannot be overwritten"
+                raise ErrorCodeContractError(
+                    ErrorCode.APPROVAL_ALREADY_RESOLVED,
+                    f"Approval {decision.approval_id} has already been decided and cannot be overwritten",
+                    details={"approval_id": str(decision.approval_id)},
+                )
+
+            expires_at = parse_datetime(approval_row["expires_at"])
+            decided_at = parse_datetime(serialize_datetime(decision.decided_at))
+            if expires_at is not None and decided_at is not None and decided_at >= expires_at:
+                raise ErrorCodeContractError(
+                    ErrorCode.APPROVAL_EXPIRED,
+                    f"Approval {decision.approval_id} expired at {expires_at.isoformat()}.",
+                    details={
+                        "approval_id": str(decision.approval_id),
+                        "expires_at": expires_at.isoformat(),
+                    },
                 )
 
             connection.execute(

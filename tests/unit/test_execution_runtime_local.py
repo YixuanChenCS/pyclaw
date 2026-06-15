@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
 import sqlite3
 import sys
@@ -10,7 +12,10 @@ import unittest
 from packages.shared_types import (
     ApprovalDecision,
     ApprovalRequest,
+    ArtifactRef,
     ArtifactType,
+    DeploymentRequest,
+    DeploymentResult,
     EntityNotFoundError,
     ErrorCode,
     ErrorCodeContractError,
@@ -27,6 +32,8 @@ from packages.shared_types import (
     Session,
     Workspace,
     build_run_event,
+    new_run_id,
+    utc_now,
 )
 from services.execution_runtime import LocalExecutionRuntimeService, SQLiteExecutionRuntimeRepository
 
@@ -39,17 +46,34 @@ class _InMemoryRepoStore:
         return self._workspaces.get(str(workspace_id))
 
 
+class _DeploymentAdapter:
+    def __init__(self) -> None:
+        self.requests = []
+
+    async def deploy(self, request):
+        self.requests.append(request)
+        return DeploymentResult(
+            run_id=request.run_id,
+            status="succeeded",
+            url=f"https://deployments.example/{request.target}",
+            started_at=utc_now(),
+            finished_at=utc_now(),
+        )
+
+
 class TestLocalExecutionRuntimeService(unittest.IsolatedAsyncioTestCase):
     def _make_runtime(
         self,
         root: Path,
         *,
         workspaces: dict[str, Workspace] | None = None,
+        deployment_adapter=None,
     ) -> tuple[LocalExecutionRuntimeService, SQLiteExecutionRuntimeRepository]:
         repository = SQLiteExecutionRuntimeRepository(root / "runtime.sqlite3")
         service = LocalExecutionRuntimeService(
             repository=repository,
             repo_store=_InMemoryRepoStore(workspaces),
+            deployment_adapter=deployment_adapter,
             stream_poll_interval=0.01,
         )
         return service, repository
@@ -134,6 +158,43 @@ class TestLocalExecutionRuntimeService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([event.event_type for event in events], [EventType.RUN_CREATED, EventType.RUN_QUEUED])
             self.assertEqual([event.sequence for event in events], [1, 2])
 
+    async def test_enqueue_run_is_idempotent_for_same_explicit_run_id(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            service, repository = self._make_runtime(Path(tmpdir))
+            run_id = new_run_id()
+            request = replace(self._make_request(), run_id=run_id)
+
+            first = await service.enqueue_run(request)
+            second = await service.enqueue_run(request)
+            events = await repository.list_events(run_id)
+
+            self.assertEqual(first, second)
+            self.assertEqual([event.sequence for event in events], [1, 2])
+
+    async def test_enqueue_run_rejects_same_run_id_for_different_request(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            service, _repository = self._make_runtime(Path(tmpdir))
+            run_id = new_run_id()
+            request = replace(self._make_request(), run_id=run_id)
+            await service.enqueue_run(request)
+
+            with self.assertRaises(ErrorCodeContractError) as context:
+                await service.enqueue_run(replace(request, prompt="Different request"))
+
+            self.assertEqual(context.exception.error_code, ErrorCode.INVALID_REQUEST)
+
+    async def test_enqueue_run_rejects_same_run_id_with_different_target_paths(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            service, _repository = self._make_runtime(Path(tmpdir))
+            run_id = new_run_id()
+            request = replace(self._make_request(), run_id=run_id, target_paths=("app.py",))
+            await service.enqueue_run(request)
+
+            with self.assertRaises(ErrorCodeContractError) as context:
+                await service.enqueue_run(replace(request, target_paths=("other.py",)))
+
+            self.assertEqual(context.exception.error_code, ErrorCode.INVALID_REQUEST)
+
     async def test_event_sequence_is_strictly_increasing_per_run(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             service, repository = self._make_runtime(Path(tmpdir))
@@ -156,6 +217,27 @@ class TestLocalExecutionRuntimeService(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual([event.event_type for event in events], [EventType.RUN_CREATED, EventType.RUN_QUEUED])
             self.assertEqual([event.sequence for event in events], [1, 2])
+
+    async def test_stream_events_replays_after_sequence_checkpoint(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            service, _repository = self._make_runtime(Path(tmpdir))
+
+            run_id = await service.enqueue_run(self._make_request())
+            stream = service.stream_events(run_id, after_sequence=1)
+            events = await self._collect_events(stream, 1)
+
+            self.assertEqual([event.sequence for event in events], [2])
+
+    async def test_stream_events_rejects_missing_checkpoint(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            service, _repository = self._make_runtime(Path(tmpdir))
+
+            run_id = await service.enqueue_run(self._make_request())
+            stream = service.stream_events(run_id, after_sequence=99)
+            with self.assertRaises(ErrorCodeContractError) as context:
+                await anext(stream)
+
+            self.assertEqual(context.exception.error_code, ErrorCode.EVENT_REPLAY_GAP)
 
     async def test_stream_events_raises_on_sequence_gap(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -625,6 +707,103 @@ class TestLocalExecutionRuntimeService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(approvals[0].approval_id, approval_request.approval_id)
             self.assertEqual(approvals[0].reason, approval_request.reason)
             self.assertEqual(approvals[0].command_argv, ("git", "push"))
+
+    async def test_approval_decision_rejects_expired_request(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root_path=tmpdir)
+            service, _repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+            )
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            request = replace(
+                self._make_approval_request(run_id),
+                expires_at=utc_now() - timedelta(seconds=1),
+            )
+            await service.request_approval(run_id, request)
+
+            with self.assertRaises(ErrorCodeContractError) as context:
+                await service.record_approval_decision(
+                    ApprovalDecision(
+                        approval_id=request.approval_id,
+                        run_id=request.run_id,
+                        approved=True,
+                    )
+                )
+
+            self.assertEqual(context.exception.error_code, ErrorCode.APPROVAL_EXPIRED)
+
+    async def test_list_runs_filters_by_workspace_session_and_status(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            service, repository = self._make_runtime(Path(tmpdir))
+            first_request = self._make_request()
+            second_request = self._make_request()
+            first_run_id = await service.enqueue_run(first_request)
+            await service.enqueue_run(second_request)
+            await repository.update_run_status(first_run_id, RunStatus.CANCELLED)
+
+            runs = await repository.list_runs(
+                first_request.workspace_id,
+                session_id=first_request.session_id,
+                status=RunStatus.CANCELLED,
+            )
+
+            self.assertEqual([str(run.run_id) for run in runs], [first_run_id])
+
+    async def test_attach_artifacts_persists_and_replays_same_artifact(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            service, repository = self._make_runtime(Path(tmpdir))
+            run_id = await service.enqueue_run(self._make_request())
+            artifact = ArtifactRef(
+                run_id=run_id,
+                artifact_type=ArtifactType.LOG,
+                label="deployment log",
+                uri="memory://deployment.log",
+            )
+
+            await service.attach_artifacts(run_id, (artifact,))
+            await service.attach_artifacts(run_id, (artifact,))
+
+            persisted = await repository.list_artifacts(run_id)
+            self.assertEqual(len(persisted), 1)
+            self.assertEqual(persisted[0].artifact_id, artifact.artifact_id)
+
+    async def test_deploy_uses_configured_adapter_for_succeeded_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            adapter = _DeploymentAdapter()
+            workspace = Workspace(root_path=tmpdir)
+            service, repository = self._make_runtime(
+                Path(tmpdir),
+                workspaces={str(workspace.workspace_id): workspace},
+                deployment_adapter=adapter,
+            )
+            run_id = await service.enqueue_run(self._make_request(workspace))
+            await service.claim_next_run("worker-a", lease_seconds=30)
+            await repository.update_run_status(run_id, RunStatus.SUCCEEDED)
+            request = DeploymentRequest(
+                run_id=run_id,
+                workspace_id=workspace.workspace_id,
+                target="staging",
+            )
+
+            result = await service.deploy(request)
+
+            self.assertEqual(result.status, "succeeded")
+            self.assertEqual(adapter.requests, [request])
+
+    async def test_health_reports_runtime_storage_queue_and_locks(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            service, _repository = self._make_runtime(Path(tmpdir))
+            await service.enqueue_run(self._make_request())
+
+            health = await service.get_health()
+
+            self.assertEqual(health.status, "ready")
+            self.assertEqual(health.details["db"], "ready")
+            self.assertEqual(health.details["artifact_store"], "ready")
+            self.assertEqual(health.details["queue"]["queued"], 1)
+            self.assertEqual(health.details["locks"]["status"], "disabled")
 
     async def test_request_approval_transitions_running_to_waiting_for_approval(self):
         with tempfile.TemporaryDirectory() as tmpdir:

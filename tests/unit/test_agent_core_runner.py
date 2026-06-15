@@ -2603,6 +2603,40 @@ class TestAgentCoreCoordinator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(outcome.session.current_plan.steps[0].status, TaskStatus.SUCCEEDED)
         self.assertIsNone(outcome.session.pending_approval_id)
 
+    async def test_resume_after_denied_approval_finalizes_failed_run(self):
+        pending_action = AgentAction(
+            type=AgentActionType.RUN_COMMAND,
+            reason="Run risky command",
+            step_id="step_1",
+            action_id="action_1_run_command_step_1",
+            command_argv=("git", "push"),
+        )
+        stored_session = self._make_session_with_plan(
+            steps=[AgentStep(step_id="step_1", kind="command", description="Run risky command")],
+            action_history=[pending_action],
+            pending_action=pending_action,
+            pending_approval_id="approval_123",
+            iteration_count=1,
+        )
+        runtime = _RecordingFakeRuntime()
+        coordinator = AgentCoreCoordinator(
+            agent_core=_SequencedFakeAgentCore(actions=[]),
+            execution_runtime=runtime,
+            session_store=_RecordingSessionStore(stored_session),
+        )
+
+        outcome = await coordinator.resume_after_approval(
+            str(stored_session.run_id),
+            approved=False,
+            reviewer="human",
+            comment="too risky",
+        )
+
+        self.assertEqual(outcome.status, "failed")
+        self.assertEqual(runtime.finalized_status, RunStatus.FAILED)
+        self.assertEqual(runtime.finalized_summary, None)
+        self.assertEqual(runtime.calls, ["record_approval_decision", "finalize_run"])
+
     async def test_resume_after_context_merges_context_and_continues(self):
         # Verifies that fulfilling ASK_CONTEXT marks the inspect step complete and then continues normal execution.
         # This catches the bug where added context was ignored and the same context request would repeat on resume.

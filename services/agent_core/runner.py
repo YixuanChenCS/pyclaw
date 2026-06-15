@@ -282,6 +282,15 @@ class AgentCoreCoordinator:
                 clear_pending_approval=True,
             )
             await self._persist_session(failed_session)
+            await self._execution_runtime.finalize_run(
+                str(session.run_id),
+                RunResult(
+                    run_id=session.run_id,
+                    status=RunStatus.FAILED,
+                    error_message=comment or "Approval denied",
+                    artifacts=tuple(failed_session.prior_artifacts),
+                ),
+            )
             return AgentRunOutcome(
                 status="failed",
                 session=failed_session,

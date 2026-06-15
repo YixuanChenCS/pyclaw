@@ -57,6 +57,8 @@ class ErrorCode(str, Enum):
     EVENT_ORDER_VIOLATION = "event_order_violation"
     EVENT_REPLAY_GAP = "event_replay_gap"
     ARTIFACT_STORE_ERROR = "artifact_store_error"
+    DEPLOYMENT_FAILED = "deployment_failed"
+    DEPLOYMENT_UNAVAILABLE = "deployment_unavailable"
 
 
 class ContractError(Exception):
