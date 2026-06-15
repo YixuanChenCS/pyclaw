@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Iterator, Mapping, Sequence
 
 from packages.shared_types import (
     ApprovalDecision,
+    ApprovalRecord,
     ApprovalRequest,
     ApprovalId,
     Artifact,
@@ -230,11 +231,25 @@ class SQLiteExecutionRuntimeRepository:
     async def list_artifacts(self, run_id: RunId | str) -> tuple[Artifact, ...]:
         return await asyncio.to_thread(self._list_artifacts_sync, RunId(str(run_id)))
 
+    async def get_artifact(self, artifact_id: ArtifactId | str) -> Artifact | None:
+        return await asyncio.to_thread(self._get_artifact_sync, ArtifactId(str(artifact_id)))
+
     async def create_approval_request(self, request: ApprovalRequest) -> RunEvent:
         return await asyncio.to_thread(self._create_approval_request_sync, request)
 
     async def list_approval_requests(self, run_id: RunId | str) -> tuple[ApprovalRequest, ...]:
         return await asyncio.to_thread(self._list_approval_requests_sync, RunId(str(run_id)))
+
+    async def list_approvals(
+        self,
+        *,
+        run_id: RunId | str | None = None,
+    ) -> tuple[ApprovalRecord, ...]:
+        typed_run_id = RunId(str(run_id)) if run_id is not None else None
+        return await asyncio.to_thread(self._list_approvals_sync, typed_run_id)
+
+    async def get_approval(self, approval_id: ApprovalId | str) -> ApprovalRecord | None:
+        return await asyncio.to_thread(self._get_approval_sync, ApprovalId(str(approval_id)))
 
     async def update_approval_decision(self, decision: ApprovalDecision) -> None:
         await asyncio.to_thread(self._update_approval_decision_sync, decision)
@@ -914,6 +929,22 @@ class SQLiteExecutionRuntimeRepository:
             connection.close()
         return tuple(self._artifact_from_row(row) for row in rows)
 
+    def _get_artifact_sync(self, artifact_id: ArtifactId) -> Artifact | None:
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                """
+                SELECT * FROM artifacts
+                WHERE artifact_id = ?
+                """,
+                (str(artifact_id),),
+            ).fetchone()
+        finally:
+            connection.close()
+        if row is None:
+            return None
+        return self._artifact_from_row(row)
+
     def _list_runs_sync(
         self,
         workspace_id: WorkspaceId | None,
@@ -995,6 +1026,45 @@ class SQLiteExecutionRuntimeRepository:
         finally:
             connection.close()
         return tuple(self._approval_request_from_row(row) for row in rows)
+
+    def _list_approvals_sync(self, run_id: RunId | None) -> tuple[ApprovalRecord, ...]:
+        connection = self._connect()
+        try:
+            if run_id is None:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM approvals
+                    ORDER BY created_at ASC, approval_id ASC
+                    """
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM approvals
+                    WHERE run_id = ?
+                    ORDER BY created_at ASC, approval_id ASC
+                    """,
+                    (str(run_id),),
+                ).fetchall()
+        finally:
+            connection.close()
+        return tuple(self._approval_record_from_row(row) for row in rows)
+
+    def _get_approval_sync(self, approval_id: ApprovalId) -> ApprovalRecord | None:
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                """
+                SELECT * FROM approvals
+                WHERE approval_id = ?
+                """,
+                (str(approval_id),),
+            ).fetchone()
+        finally:
+            connection.close()
+        if row is None:
+            return None
+        return self._approval_record_from_row(row)
 
     def _update_approval_decision_sync(self, decision: ApprovalDecision) -> None:
         with self._transaction("IMMEDIATE") as connection:
@@ -1531,6 +1601,54 @@ class SQLiteExecutionRuntimeRepository:
             created_at=parse_datetime(row["created_at"]) or utc_now(),
             expires_at=parse_datetime(row["expires_at"]),
         )
+
+    def _approval_record_from_row(self, row: sqlite3.Row) -> ApprovalRecord:
+        payload = json_loads(row["command_argv_json"])
+        raw_command_argv = payload.get("command_argv", [])
+        if not isinstance(raw_command_argv, list):
+            raw_command_argv = []
+        command_argv = tuple(str(item) for item in raw_command_argv)
+        expires_at = parse_datetime(row["expires_at"])
+        decided_at = parse_datetime(row["decided_at"])
+        created_at = parse_datetime(row["created_at"]) or utc_now()
+        approved_value = row["approved"]
+        approved = None if approved_value is None else bool(int(approved_value))
+        kind = "patch" if row["patch_id"] else "command" if command_argv else "generic"
+        status = self._approval_status_from_row(
+            approved=approved,
+            expires_at=expires_at,
+        )
+        return ApprovalRecord(
+            approval_id=ApprovalId(row["approval_id"]),
+            run_id=RunId(row["run_id"]),
+            status=status,
+            kind=kind,
+            reason=row["reason"],
+            task_id=TaskId(row["task_id"]) if row["task_id"] else None,
+            patch_id=ArtifactId(row["patch_id"]) if row["patch_id"] else None,
+            command_argv=command_argv,
+            approved=approved,
+            created_at=created_at,
+            updated_at=decided_at,
+            decided_at=decided_at,
+            expires_at=expires_at,
+            reviewer=row["reviewer"],
+            comment=row["comment"],
+        )
+
+    def _approval_status_from_row(
+        self,
+        *,
+        approved: bool | None,
+        expires_at,
+    ) -> str:
+        if approved is True:
+            return "approved"
+        if approved is False:
+            return "rejected"
+        if expires_at is not None and expires_at <= utc_now():
+            return "expired"
+        return "pending"
 
     def _recovery_status_from_row(self, row: sqlite3.Row) -> RecoveryStatus:
         payload = json_loads(row["recovery_options_json"])

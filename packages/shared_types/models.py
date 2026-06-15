@@ -268,6 +268,25 @@ class ApprovalDecision(SerializableModel):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class ApprovalRecord(SerializableModel):
+    approval_id: ApprovalId
+    run_id: RunId
+    status: str
+    kind: str
+    reason: str
+    task_id: TaskId | None = None
+    patch_id: ArtifactId | None = None
+    command_argv: tuple[str, ...] = ()
+    approved: bool | None = None
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime | None = None
+    decided_at: datetime | None = None
+    expires_at: datetime | None = None
+    reviewer: str | None = None
+    comment: str | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class RecoveryStatus(SerializableModel):
     run_id: RunId
     recovery_state: RecoveryState
@@ -409,6 +428,7 @@ __all__ = [
     "AgentPlan",
     "AgentPlanStep",
     "ApprovalDecision",
+    "ApprovalRecord",
     "ApprovalRequest",
     "Artifact",
     "ArtifactRef",
