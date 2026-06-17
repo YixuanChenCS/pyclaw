@@ -523,6 +523,7 @@ class SQLiteExecutionRuntimeRepository:
         return row is not None
 
     def _get_health_snapshot_sync(self) -> dict[str, object]:
+        serialized_now = serialize_datetime(utc_now())
         connection = self._connect()
         try:
             connection.execute("SELECT 1").fetchone()
@@ -532,6 +533,30 @@ class SQLiteExecutionRuntimeRepository:
             artifact_count = connection.execute(
                 "SELECT COUNT(*) AS count FROM artifacts"
             ).fetchone()
+            queue_depth = connection.execute(
+                "SELECT COUNT(*) AS count FROM runs WHERE status = ?",
+                (RunStatus.QUEUED.value,),
+            ).fetchone()
+            stale_run_count = connection.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM runs
+                WHERE status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
+                """,
+                (RunStatus.RUNNING.value, serialized_now),
+            ).fetchone()
+            needs_recovery_count = connection.execute(
+                "SELECT COUNT(*) AS count FROM runs WHERE status = ?",
+                (RunStatus.NEEDS_RECOVERY.value,),
+            ).fetchone()
+            active_lease_count = connection.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM runs
+                WHERE status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at >= ?
+                """,
+                (RunStatus.RUNNING.value, serialized_now),
+            ).fetchone()
         finally:
             connection.close()
         return {
@@ -540,6 +565,10 @@ class SQLiteExecutionRuntimeRepository:
                 str(row["status"]): int(row["count"])
                 for row in status_rows
             },
+            "queue_depth": int(queue_depth["count"]),
+            "stale_run_count": int(stale_run_count["count"]),
+            "needs_recovery_count": int(needs_recovery_count["count"]),
+            "active_lease_count": int(active_lease_count["count"]),
             "artifact_store": "ready",
             "artifact_count": int(artifact_count["count"]),
         }

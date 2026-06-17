@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from apps.api import create_app
 from apps.api.app import ArtifactDetailResponse
-from packages.shared_types import EntityNotFoundError
+from apps.api.platform_api import ArtifactDownload
+from packages.shared_types import EntityNotFoundError, ErrorCode, ErrorCodeContractError
 
 
 class _FakePlatformAPI:
@@ -59,6 +62,21 @@ class _FakePlatformAPI:
     async def get_artifact(self, artifact_id: str) -> ArtifactDetailResponse | None:
         return self.artifacts_by_id.get(artifact_id)
 
+    async def get_artifact_download(self, artifact_id: str) -> ArtifactDownload | None:
+        if artifact_id == "artifact_text":
+            raise ErrorCodeContractError(
+                ErrorCode.INVALID_REQUEST,
+                "Artifact artifact_text does not expose a downloadable file.",
+            )
+        if artifact_id == "artifact_missing":
+            return None
+        return ArtifactDownload(
+            artifact_id=artifact_id,
+            path=Path(__file__),
+            media_type="text/plain",
+            filename="artifact.txt",
+        )
+
 
 def test_list_run_artifacts_returns_200():
     app = create_app(platform_api=_FakePlatformAPI())
@@ -80,6 +98,7 @@ def test_list_run_artifacts_returns_200():
             "content_inline": True,
             "content_kind": "text",
             "content_note": None,
+            "download_uri": None,
         }
     ]
 
@@ -108,6 +127,7 @@ def test_get_artifact_returns_textual_content_when_inline():
     assert response.json()["content"] == "hello world"
     assert response.json()["content_inline"] is True
     assert response.json()["content_kind"] == "text"
+    assert response.json()["download_uri"] is None
 
 
 def test_get_artifact_returns_non_inline_metadata_for_binary_artifact():
@@ -121,6 +141,33 @@ def test_get_artifact_returns_non_inline_metadata_for_binary_artifact():
     assert response.json()["content_inline"] is False
     assert response.json()["content_kind"] == "binary"
     assert response.json()["content_note"] == "Binary artifact is not inlined."
+    assert response.json()["download_uri"] is None
+
+
+def test_download_artifact_returns_file_response():
+    app = create_app(platform_api=_FakePlatformAPI())
+
+    with TestClient(app) as client:
+        response = client.get("/artifacts/artifact_bin/download")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert "attachment; filename=\"artifact.txt\"" in response.headers["content-disposition"]
+
+
+def test_download_artifact_returns_400_when_artifact_is_not_downloadable():
+    app = create_app(platform_api=_FakePlatformAPI())
+
+    with TestClient(app) as client:
+        response = client.get("/artifacts/artifact_text/download")
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": {
+            "code": "invalid_request",
+            "message": "Artifact artifact_text does not expose a downloadable file.",
+        }
+    }
 
 
 def test_get_artifact_returns_404_when_missing():

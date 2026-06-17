@@ -7,6 +7,9 @@ from packages.shared_types import (
     EntityNotFoundError,
     EventType,
     InvalidRunStateError,
+    RecoveryOption,
+    RecoveryState,
+    RecoveryStatus,
     RunEvent,
     RunRequest,
     RunResult,
@@ -26,7 +29,9 @@ class _FakePlatformAPI:
         self.missing_event_run_ids: set[str] = set()
         self.missing_cancel_run_ids: set[str] = set()
         self.conflict_cancel_run_ids: set[str] = set()
-        self.list_runs_calls: list[tuple[str | None, str | None, int | None]] = []
+        self.recovery_by_run_id: dict[str, RecoveryStatus] = {}
+        self.rollback_calls: list[tuple[str, str]] = []
+        self.list_runs_calls: list[tuple[str | None, str | None, str | None, int | None]] = []
 
     async def create_run(self, request: RunRequest) -> str:
         self.create_run_request = request
@@ -40,7 +45,14 @@ class _FakePlatformAPI:
         status: str | RunStatus | None = None,
         limit: int | None = None,
     ) -> tuple[RunResult, ...]:
-        self.list_runs_calls.append((workspace_id, None if status is None else str(status), limit))
+        self.list_runs_calls.append(
+            (
+                workspace_id,
+                session_id,
+                None if status is None else str(status),
+                limit,
+            )
+        )
         runs = tuple(self.runs.values())
         if status is not None:
             status_value = status.value if isinstance(status, RunStatus) else status
@@ -66,6 +78,28 @@ class _FakePlatformAPI:
         if run_id in self.conflict_cancel_run_ids:
             raise InvalidRunStateError(f"Cannot cancel terminal run {run_id}")
         self.cancelled_run_ids.append(run_id)
+
+    async def get_recovery_status(self, run_id: str) -> RecoveryStatus | None:
+        if run_id not in self.runs:
+            raise EntityNotFoundError("run", run_id)
+        return self.recovery_by_run_id.get(run_id)
+
+    async def rollback_recovery(self, run_id: str, task_id: str) -> RecoveryStatus:
+        if run_id not in self.runs:
+            raise EntityNotFoundError("run", run_id)
+        self.rollback_calls.append((run_id, task_id))
+        if run_id not in self.recovery_by_run_id:
+            raise InvalidRunStateError(f"No rollback snapshot exists for task {task_id}")
+        recovery = RecoveryStatus(
+            run_id=run_id,
+            recovery_state=RecoveryState.ROLLBACK_REQUIRED_REVIEW,
+            reason="Rollback completed; manual review is required before continuing the run.",
+            task_id=task_id,
+            recovery_options=(RecoveryOption.REVIEW_MANUALLY, RecoveryOption.ABORT),
+            rollback_task_id=task_id,
+        )
+        self.recovery_by_run_id[run_id] = recovery
+        return recovery
 
 
 def test_create_run_returns_202_and_converts_request_body():
@@ -137,11 +171,19 @@ def test_list_runs_passes_filters():
     app = create_app(platform_api=platform_api)
 
     with TestClient(app) as client:
-        response = client.get("/runs", params={"workspace_id": "ws_test", "status": "succeeded", "limit": 1})
+        response = client.get(
+            "/runs",
+            params={
+                "workspace_id": "ws_test",
+                "session_id": "session_test",
+                "status": "succeeded",
+                "limit": 1,
+            },
+        )
 
     assert response.status_code == 200
     assert [item["run_id"] for item in response.json()] == [done_run_id]
-    assert platform_api.list_runs_calls[-1] == ("ws_test", "succeeded", 1)
+    assert platform_api.list_runs_calls[-1] == ("ws_test", "session_test", "succeeded", 1)
 
 
 def test_get_run_returns_200_when_run_exists():
@@ -171,6 +213,87 @@ def test_get_run_returns_404_when_run_is_missing():
     assert response.status_code == 404
     assert response.json() == {
         "error": {"code": "not_found", "message": "run not found: run_missing"}
+    }
+
+
+def test_get_run_recovery_returns_current_recovery_status():
+    platform_api = _FakePlatformAPI()
+    run_id = str(new_run_id())
+    platform_api.runs[run_id] = RunResult(run_id=run_id, status=RunStatus.NEEDS_RECOVERY, summary=None)
+    platform_api.recovery_by_run_id[run_id] = RecoveryStatus(
+        run_id=run_id,
+        recovery_state=RecoveryState.ROLLBACK_AVAILABLE,
+        reason="Patch task interrupted.",
+        task_id="task_patch",
+        recovery_options=(RecoveryOption.ROLLBACK_IF_AVAILABLE, RecoveryOption.REVIEW_MANUALLY),
+        rollback_task_id="task_patch",
+    )
+    app = create_app(platform_api=platform_api)
+
+    with TestClient(app) as client:
+        response = client.get(f"/runs/{run_id}/recovery")
+
+    assert response.status_code == 200
+    assert response.json()["run_id"] == run_id
+    assert response.json()["recovery_state"] == "rollback_available"
+    assert response.json()["rollback_task_id"] == "task_patch"
+
+
+def test_get_run_recovery_returns_409_when_run_is_not_in_recovery():
+    platform_api = _FakePlatformAPI()
+    run_id = str(new_run_id())
+    platform_api.runs[run_id] = RunResult(run_id=run_id, status=RunStatus.RUNNING, summary=None)
+    app = create_app(platform_api=platform_api)
+
+    with TestClient(app) as client:
+        response = client.get(f"/runs/{run_id}/recovery")
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "error": {
+            "code": "invalid_state_transition",
+            "message": f"Run {run_id} is not waiting on recovery.",
+        }
+    }
+
+
+def test_rollback_run_recovery_returns_updated_recovery_status():
+    platform_api = _FakePlatformAPI()
+    run_id = str(new_run_id())
+    platform_api.runs[run_id] = RunResult(run_id=run_id, status=RunStatus.NEEDS_RECOVERY, summary=None)
+    platform_api.recovery_by_run_id[run_id] = RecoveryStatus(
+        run_id=run_id,
+        recovery_state=RecoveryState.ROLLBACK_AVAILABLE,
+        reason="Patch task interrupted.",
+        task_id="task_patch",
+        recovery_options=(RecoveryOption.ROLLBACK_IF_AVAILABLE, RecoveryOption.REVIEW_MANUALLY),
+        rollback_task_id="task_patch",
+    )
+    app = create_app(platform_api=platform_api)
+
+    with TestClient(app) as client:
+        response = client.post(f"/runs/{run_id}/recovery/rollback", params={"task_id": "task_patch"})
+
+    assert response.status_code == 200
+    assert platform_api.rollback_calls == [(run_id, "task_patch")]
+    assert response.json()["recovery_state"] == "rollback_required_review"
+
+
+def test_rollback_run_recovery_returns_409_when_snapshot_is_unavailable():
+    platform_api = _FakePlatformAPI()
+    run_id = str(new_run_id())
+    platform_api.runs[run_id] = RunResult(run_id=run_id, status=RunStatus.NEEDS_RECOVERY, summary=None)
+    app = create_app(platform_api=platform_api)
+
+    with TestClient(app) as client:
+        response = client.post(f"/runs/{run_id}/recovery/rollback", params={"task_id": "task_patch"})
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "error": {
+            "code": "invalid_state_transition",
+            "message": "No rollback snapshot exists for task task_patch",
+        }
     }
 
 

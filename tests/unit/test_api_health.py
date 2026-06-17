@@ -43,6 +43,10 @@ def _platform_health(
                 or {
                     "db": "ready",
                     "queue": {"queued": 0},
+                    "queue_depth": 0,
+                    "stale_run_count": 0,
+                    "needs_recovery_count": 0,
+                    "active_lease_count": 0,
                     "locks": {"status": "ready", "active_leases": 0},
                     "artifact_store": "ready",
                     "deployment": "ready",
@@ -86,6 +90,10 @@ def test_health_route_returns_503_for_unhealthy_components(
     runtime_details = {
         "db": "ready",
         "queue": {"queued": 0},
+        "queue_depth": 0,
+        "stale_run_count": 0,
+        "needs_recovery_count": 0,
+        "active_lease_count": 0,
         "locks": {"status": "ready", "active_leases": 0},
         "artifact_store": "ready",
         "deployment": "ready",
@@ -136,4 +144,5 @@ def test_health_route_reports_missing_deployment_adapter_without_crashing():
     body = response.json()
     assert body["status"] == "ready"
     assert body["details"]["runtime"]["details"]["deployment"] == "not_configured"
-
+    assert body["details"]["runtime"]["details"]["queue_depth"] == 0
+    assert body["details"]["runtime"]["details"]["stale_run_count"] == 0

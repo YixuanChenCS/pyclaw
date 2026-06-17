@@ -45,6 +45,23 @@ The runtime does not treat in-memory queues or in-memory event buffers as author
 
 `stream_events` replays historical and live events by polling `run_events` ordered by per-run sequence. This avoids missing events across restarts and guarantees replay can reconstruct the durable history. Sequence validation detects gaps or order violations instead of silently skipping inconsistent state.
 
+## Queue Consumer Boundary
+
+`execution_runtime` owns durable queue state, but it does not itself spawn a background worker loop.
+
+- `enqueue_run` persists a queued run
+- `claim_run` and `claim_next_run` are explicit operations that must be invoked by some caller
+- `AgentCoreCoordinator.run()` is a separate orchestration step after a run has been claimed
+
+This means an API layer can safely enqueue runs without also becoming the queue consumer. In the current codebase, the FastAPI app is control-plane only: it constructs a runtime and coordinator, but it does not automatically poll the queue or execute claimed work on process startup.
+
+If you want a standalone deployment that both accepts HTTP requests and executes runs, you need an explicit worker strategy outside the current API bootstrap:
+
+- a separate worker process that claims queued runs and invokes the coordinator
+- or an embedded worker loop added intentionally to the API server lifecycle
+
+That choice affects recovery, capacity management, and operational isolation, so it should be treated as a deployment decision rather than an implicit property of `POST /runs`.
+
 ## Claim, Lease, Heartbeat, And Recovery
 
 Run claiming is SQLite-backed and atomic:

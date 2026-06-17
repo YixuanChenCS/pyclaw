@@ -1,5 +1,9 @@
 """CLI app scaffolding."""
 
+from packages._python_compat import require_supported_python
+
+require_supported_python(component="Pyclaw CLI")
+
 from .app import (
     CLIApplication,
     build_cli_parser,

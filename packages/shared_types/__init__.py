@@ -1,5 +1,9 @@
 """Shared contract surface for the modular pyclaw platform."""
 
+from packages._python_compat import require_supported_python
+
+require_supported_python(component="Pyclaw shared types")
+
 from .enums import ArtifactType, EventType, RecoveryOption, RecoveryState, RunStatus, TaskStatus
 from .errors import (
     ContractError,

@@ -5,7 +5,16 @@ import json
 from fastapi.testclient import TestClient
 
 from apps.api import create_app
-from packages.shared_types import EventType, RunEvent, RunResult, RunStatus, new_event_id, new_run_id
+from packages.shared_types import (
+    ErrorCode,
+    ErrorCodeContractError,
+    EventType,
+    RunEvent,
+    RunResult,
+    RunStatus,
+    new_event_id,
+    new_run_id,
+)
 
 
 class _FakePlatformAPI:
@@ -38,6 +47,15 @@ class _FakePlatformAPI:
         )
 
 
+class _ReplayGapPlatformAPI(_FakePlatformAPI):
+    async def stream_run_events(self, run_id: str, *, last_event_id: str | None = None):
+        raise ErrorCodeContractError(
+            ErrorCode.EVENT_REPLAY_GAP,
+            f"Last event id was not found for run {run_id}: {last_event_id}",
+        )
+        yield
+
+
 def test_run_event_stream_replays_fake_events():
     platform_api = _FakePlatformAPI()
     app = create_app(platform_api=platform_api)
@@ -64,4 +82,23 @@ def test_run_event_stream_returns_404_when_run_missing():
     assert response.status_code == 404
     assert response.json() == {
         "error": {"code": "not_found", "message": "run not found: run_missing"}
+    }
+
+
+def test_run_event_stream_returns_stable_error_for_replay_gap():
+    platform_api = _ReplayGapPlatformAPI()
+    app = create_app(platform_api=platform_api)
+
+    with TestClient(app) as client:
+        response = client.get(
+            f"/runs/{platform_api.run_id}/events/stream",
+            params={"last_event_id": "event_missing"},
+        )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "error": {
+            "code": "event_replay_gap",
+            "message": f"Last event id was not found for run {platform_api.run_id}: event_missing",
+        }
     }
